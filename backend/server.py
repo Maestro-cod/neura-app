@@ -306,7 +306,7 @@ async def ai_chat(payload: ChatRequest):
         chat = (
             LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system)
             .with_model("anthropic", "claude-sonnet-4-5-20250929")
-            .with_max_tokens(800)
+            .with_params(max_tokens=800)
         )
         reply = await chat.send_message(UserMessage(text=payload.message))
         return {"reply": reply}
@@ -334,7 +334,7 @@ async def ai_insight(payload: InsightRequest):
         chat = (
             LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"insight-{payload.user_id}", system_message=system)
             .with_model("anthropic", "claude-sonnet-4-5-20250929")
-            .with_max_tokens(80)
+            .with_params(max_tokens=80)
         )
         msg = f"Most urgent task: '{title}' (urgency: {urgency}). Give me one short, calm tip."
         tip = await chat.send_message(UserMessage(text=msg))
