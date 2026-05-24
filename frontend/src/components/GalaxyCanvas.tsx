@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { View, StyleSheet, Dimensions } from "react-native";
+import { View, StyleSheet, Dimensions, Platform } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -106,9 +106,13 @@ const styles = StyleSheet.create({
   },
   star: {
     position: "absolute",
-    shadowOpacity: 0.9,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 2,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0 0 3px currentColor" as any }
+      : {
+          shadowOpacity: 0.9,
+          shadowRadius: 3,
+          shadowOffset: { width: 0, height: 0 },
+          elevation: 2,
+        }),
   },
 });
