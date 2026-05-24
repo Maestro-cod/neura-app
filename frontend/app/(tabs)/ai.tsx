@@ -57,6 +57,10 @@ export default function AIAssistant() {
     }
   };
 
+  const onInputFocus = () => {
+    if (isFree) setUpgrade(true);
+  };
+
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.header}>
@@ -115,14 +119,15 @@ export default function AIAssistant() {
             placeholderTextColor={colors.textMuted}
             style={styles.input}
             editable={!isFree}
+            onFocus={onInputFocus}
             onSubmitEditing={send}
             returnKeyType="send"
             multiline
           />
           <Pressable
             onPress={send}
-            disabled={sending || !input.trim()}
-            style={[styles.sendBtn, { opacity: !input.trim() || sending ? 0.5 : 1 }]}
+            disabled={sending || (!isFree && !input.trim())}
+            style={[styles.sendBtn, { opacity: sending || (!isFree && !input.trim()) ? 0.5 : 1 }]}
             testID="chat-send-button"
           >
             <Ionicons name="arrow-up" size={20} color="#050508" />

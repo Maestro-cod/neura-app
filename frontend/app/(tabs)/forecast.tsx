@@ -34,9 +34,8 @@ export default function Forecast() {
   }, [user]);
 
   useFocusEffect(useCallback(() => {
-    if (!isLocked) load();
-    else setLoading(false);
-  }, [load, isLocked]));
+    load();
+  }, [load]));
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
