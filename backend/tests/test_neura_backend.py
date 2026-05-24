@@ -114,3 +114,14 @@ class TestBilling:
         payload = {"user_id": str(uuid.uuid4()), "return_url": "https://example.com/back"}
         r = api_client.post(f"{API}/billing/portal", json=payload, timeout=15)
         assert r.status_code == 404
+
+    def test_webhook_no_signature_rejected(self, api_client):
+        # Webhook with no Stripe-Signature header must be rejected (400)
+        r = requests.post(
+            f"{API}/billing/webhook",
+            data=b'{"type":"test"}',
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        assert r.status_code == 400, r.text
+
