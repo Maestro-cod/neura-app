@@ -56,13 +56,18 @@ export default function Galaxy() {
     return "low";
   }, [tasks]);
 
+  const enrichedZones = useMemo<Zone[]>(
+    () => zones.map((z) => ({ ...z, color: z.color || zoneColors[z.name] || "#888888" })),
+    [zones]
+  );
+
   const counts: Record<string, number> = {};
   for (const z of zones) counts[z.id] = 0;
   for (const t of tasks) if (t.zone_id) counts[t.zone_id] = (counts[t.zone_id] || 0) + 1;
 
   return (
     <View style={styles.root}>
-      <GalaxyCanvas />
+      <GalaxyCanvas zones={enrichedZones} />
 
       {/* Top bar */}
       <SafeAreaView edges={["top"]} style={styles.topBar}>
