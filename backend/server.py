@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, APIRouter, Request, HTTPException, Header
+from fastapi import FastAPI, APIRouter, Request, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -17,6 +17,8 @@ from pydantic import BaseModel
 import stripe
 from supabase import create_client, Client
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+from auth import get_current_user, require_self
 
 
 ROOT_DIR = Path(__file__).parent
@@ -31,7 +33,8 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 STRIPE_SECRET_KEY = os.environ["STRIPE_SECRET_KEY"]
 STRIPE_PRO_PRICE_ID = os.environ["STRIPE_PRO_PRICE_ID"]
 STRIPE_FAMILY_PRICE_ID = os.environ["STRIPE_FAMILY_PRICE_ID"]
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+# Webhook secret is mandatory — server refuses to start without it
+STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 
 stripe.api_key = STRIPE_SECRET_KEY
@@ -41,10 +44,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 app = FastAPI(title="NEURA API")
 api = APIRouter(prefix="/api")
 
+# Fix: restrict CORS to explicit origins instead of wildcard
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8081").split(",")
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -82,7 +87,7 @@ def fetch_zones(user_id: str) -> List[dict]:
         return []
 
 
-# ---------- Health ----------
+# ---------- Health (public) ----------
 @api.get("/health")
 async def health():
     return {"status": "ok", "service": "neura", "ts": datetime.now(timezone.utc).isoformat()}
@@ -108,7 +113,11 @@ class CheckoutRequest(BaseModel):
 
 
 @api.post("/billing/create-checkout-session")
-async def create_checkout(payload: CheckoutRequest):
+async def create_checkout(
+    payload: CheckoutRequest,
+    current_user: str = Depends(get_current_user),
+):
+    require_self(current_user, payload.user_id)
     if payload.plan not in ("pro", "family"):
         raise HTTPException(400, "Invalid plan")
     price_id = STRIPE_PRO_PRICE_ID if payload.plan == "pro" else STRIPE_FAMILY_PRICE_ID
@@ -150,7 +159,11 @@ class PortalRequest(BaseModel):
 
 
 @api.post("/billing/portal")
-async def billing_portal(payload: PortalRequest):
+async def billing_portal(
+    payload: PortalRequest,
+    current_user: str = Depends(get_current_user),
+):
+    require_self(current_user, payload.user_id)
     profile = fetch_profile(payload.user_id)
     if not profile or not profile.get("stripe_customer_id"):
         raise HTTPException(404, "No Stripe customer for this user.")
@@ -171,9 +184,13 @@ class VerifyRequest(BaseModel):
 
 
 @api.post("/billing/verify-session")
-async def verify_session(payload: VerifyRequest):
+async def verify_session(
+    payload: VerifyRequest,
+    current_user: str = Depends(get_current_user),
+):
     """Client calls after success redirect to confirm plan upgrade
-    without waiting for the webhook (also runs even if webhook isn't configured)."""
+    without waiting for the webhook."""
+    require_self(current_user, payload.user_id)
     try:
         session = stripe.checkout.Session.retrieve(payload.session_id, expand=["subscription"])
     except Exception as e:
@@ -196,16 +213,12 @@ async def verify_session(payload: VerifyRequest):
     return {"updated": True, "plan": plan}
 
 
+# Webhook is authenticated by Stripe signature, not JWT — keep it public
 @app.post("/api/billing/webhook")
 async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Header(None)):
     payload = await request.body()
     try:
-        if STRIPE_WEBHOOK_SECRET:
-            event = stripe.Webhook.construct_event(payload, stripe_signature, STRIPE_WEBHOOK_SECRET)
-        else:
-            # No webhook secret configured — accept raw JSON (test only)
-            import json as _json
-            event = _json.loads(payload)
+        event = stripe.Webhook.construct_event(payload, stripe_signature, STRIPE_WEBHOOK_SECRET)
     except Exception as e:
         logger.warning("Webhook verify failed: %s", e)
         raise HTTPException(400, str(e))
@@ -261,7 +274,6 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
 class ChatRequest(BaseModel):
     user_id: str
     message: str
-    session_id: Optional[str] = None  # client-managed conversation thread id
 
 
 def build_system_prompt(user_id: str) -> str:
@@ -297,10 +309,15 @@ def build_system_prompt(user_id: str) -> str:
 
 
 @api.post("/ai/chat")
-async def ai_chat(payload: ChatRequest):
+async def ai_chat(
+    payload: ChatRequest,
+    current_user: str = Depends(get_current_user),
+):
+    require_self(current_user, payload.user_id)
     if not payload.message.strip():
         raise HTTPException(400, "Empty message")
-    session_id = payload.session_id or f"neura-{payload.user_id}"
+    # session_id is always derived server-side — never trust client input
+    session_id = f"neura-{current_user}"
     try:
         system = build_system_prompt(payload.user_id)
         chat = (
@@ -320,11 +337,14 @@ class InsightRequest(BaseModel):
 
 
 @api.post("/ai/insight")
-async def ai_insight(payload: InsightRequest):
+async def ai_insight(
+    payload: InsightRequest,
+    current_user: str = Depends(get_current_user),
+):
+    require_self(current_user, payload.user_id)
     tasks = fetch_tasks(payload.user_id)
     if not tasks:
         return {"insight": "Your mind is clear — no open tasks. Add one to start orbiting NEURA."}
-    # pick most urgent
     order = {"high": 3, "med": 2, "low": 1}
     top = max(tasks, key=lambda t: order.get(t.get("urgency", "low"), 0))
     title = top.get("title")
@@ -350,9 +370,12 @@ class ForecastRequest(BaseModel):
 
 
 @api.post("/ai/forecast")
-async def stress_forecast(payload: ForecastRequest):
-    """Compute a 30-day stress forecast based on task due dates and urgency.
-    Returns a list of {date, score, level}."""
+async def stress_forecast(
+    payload: ForecastRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """Compute a 30-day stress forecast based on task due dates and urgency."""
+    require_self(current_user, payload.user_id)
     from collections import defaultdict
     import datetime as dt
     today = dt.date.today()
@@ -393,8 +416,12 @@ class DeleteAccountRequest(BaseModel):
 
 
 @api.post("/account/delete")
-async def delete_account(payload: DeleteAccountRequest):
+async def delete_account(
+    payload: DeleteAccountRequest,
+    current_user: str = Depends(get_current_user),
+):
     """Permanently delete user + all their data."""
+    require_self(current_user, payload.user_id)
     uid = payload.user_id
     profile = fetch_profile(uid)
     if profile and profile.get("stripe_subscription_id"):
