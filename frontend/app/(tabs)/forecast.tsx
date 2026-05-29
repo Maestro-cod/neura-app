@@ -18,10 +18,15 @@ export default function Forecast() {
   const [loading, setLoading] = useState(true);
   const [upgrade, setUpgrade] = useState(false);
 
-  const isLocked = profile?.plan === "free";
+  const isLocked = !profile || profile.plan === "free";
 
   const load = useCallback(async () => {
     if (!user) return;
+    // Don't call the API for free users — forecast is a Pro feature
+    if (isLocked) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { forecast } = await api.forecast(user.id);
@@ -31,7 +36,7 @@ export default function Forecast() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, isLocked]);
 
   useFocusEffect(useCallback(() => {
     load();
@@ -44,36 +49,38 @@ export default function Forecast() {
         <Text style={styles.sub}>Next 30 days · predicted mental load</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }} testID="forecast-screen">
-        <GlassCard strong style={{ marginBottom: spacing.lg }}>
-          <View style={styles.legend}>
-            <LegendDot color={urgencyColors.low} label="Calm" />
-            <LegendDot color={urgencyColors.med} label="Tense" />
-            <LegendDot color={urgencyColors.high} label="Heavy" />
-          </View>
-        </GlassCard>
+      <View style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }} testID="forecast-screen">
+          <GlassCard strong style={{ marginBottom: spacing.lg }}>
+            <View style={styles.legend}>
+              <LegendDot color={urgencyColors.low} label="Calm" />
+              <LegendDot color={urgencyColors.med} label="Tense" />
+              <LegendDot color={urgencyColors.high} label="Heavy" />
+            </View>
+          </GlassCard>
 
-        {loading ? (
-          <ActivityIndicator color={colors.gradientStart} />
-        ) : (
-          <View style={styles.grid} testID="forecast-calendar-grid">
-            {days.map((d) => {
-              const c = urgencyColors[d.level];
-              const dayNum = parseInt(d.date.slice(-2), 10);
-              const monthNum = parseInt(d.date.slice(5, 7), 10);
-              return (
-                <View
-                  key={d.date}
-                  testID="forecast-day-cell"
-                  style={[styles.cell, { borderColor: c + "66", backgroundColor: c + "1A" }]}
-                >
-                  <Text style={[styles.cellDay, { color: c }]}>{dayNum}</Text>
-                  <Text style={styles.cellMonth}>{monthNum}</Text>
-                </View>
-              );
-            })}
-          </View>
-        )}
+          {loading && !isLocked ? (
+            <ActivityIndicator color={colors.gradientStart} />
+          ) : !isLocked ? (
+            <View style={styles.grid} testID="forecast-calendar-grid">
+              {days.map((d) => {
+                const c = urgencyColors[d.level];
+                const dayNum = parseInt(d.date.slice(-2), 10);
+                const monthNum = parseInt(d.date.slice(5, 7), 10);
+                return (
+                  <View
+                    key={d.date}
+                    testID="forecast-day-cell"
+                    style={[styles.cell, { borderColor: c + "66", backgroundColor: c + "1A" }]}
+                  >
+                    <Text style={[styles.cellDay, { color: c }]}>{dayNum}</Text>
+                    <Text style={styles.cellMonth}>{monthNum}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </ScrollView>
 
         {isLocked && (
           <View style={styles.lockOverlay} pointerEvents="auto" testID="pro-upgrade-overlay">
@@ -92,7 +99,7 @@ export default function Forecast() {
             </GlassCard>
           </View>
         )}
-      </ScrollView>
+      </View>
       <UpgradeModal visible={upgrade} onClose={() => setUpgrade(false)} reason="Unlock your 30-day stress forecast." />
     </SafeAreaView>
   );

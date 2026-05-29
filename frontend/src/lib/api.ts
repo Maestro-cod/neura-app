@@ -5,7 +5,7 @@
  */
 import { supabase } from "./supabase";
 
-const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL as string;
+const BACKEND = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL) as string;
 
 async function post<T = any>(path: string, body: any): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();

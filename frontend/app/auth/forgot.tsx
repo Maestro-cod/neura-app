@@ -21,7 +21,7 @@ export default function Forgot() {
     setErr(null);
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: process.env.EXPO_PUBLIC_BACKEND_URL,
+      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
     });
     setLoading(false);
     if (error) setErr(error.message);
