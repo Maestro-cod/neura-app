@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import WebView from "react-native-webview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,12 +33,13 @@ function buildGalaxyHTML(zones: Array<{ name: string; color: string }>): string 
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{width:100%;height:100%;overflow:hidden;background:#02020a;}
+html,body{width:100%;height:100%;overflow:hidden;background:#02020a;touch-action:none;}
 canvas{display:block;}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<canvas id="bloom" style="display:none;"></canvas>
 <script>
 /* ── Zone data injected from React Native ── */
 const ZONES=${zonesJson};
@@ -46,14 +47,114 @@ const ZONES=${zonesJson};
 /* ── Canvas setup ── */
 const c=document.getElementById('c');
 const ctx=c.getContext('2d');
+const bloomCanvas=document.getElementById('bloom');
+const bloomCtx=bloomCanvas.getContext('2d');
 let W,H,CX,CY;
 function resize(){
-  W=c.width=window.innerWidth;
-  H=c.height=window.innerHeight;
+  W=c.width=bloomCanvas.width=window.innerWidth;
+  H=c.height=bloomCanvas.height=window.innerHeight;
   CX=W/2; CY=H/2;
 }
 resize();
 window.addEventListener('resize',resize);
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FEATURE 1: Pinch-to-zoom & drag-to-rotate gestures
+   ══════════════════════════════════════════════════════════════════════════════ */
+let gestureScale = 1.0;
+let gestureRotation = 0;        /* additional rotation offset in radians */
+let _pinchStartDist = 0;
+let _pinchStartScale = 1;
+let _dragStartX = 0;
+let _dragStartRot = 0;
+let _activeTouches = 0;
+/* Mouse wheel zoom (desktop) */
+let _mouseDown = false;
+let _mouseStartX = 0;
+let _mouseStartRot = 0;
+
+function touchDist(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+c.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  _activeTouches = e.touches.length;
+  if (e.touches.length === 2) {
+    _pinchStartDist = touchDist(e.touches);
+    _pinchStartScale = gestureScale;
+  } else if (e.touches.length === 1) {
+    _dragStartX = e.touches[0].clientX;
+    _dragStartRot = gestureRotation;
+  }
+}, { passive: false });
+
+c.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 2) {
+    /* Pinch to zoom */
+    const dist = touchDist(e.touches);
+    const ratio = dist / _pinchStartDist;
+    gestureScale = Math.max(0.3, Math.min(4.0, _pinchStartScale * ratio));
+  } else if (e.touches.length === 1 && _activeTouches === 1) {
+    /* Drag to rotate */
+    const dx = e.touches[0].clientX - _dragStartX;
+    gestureRotation = _dragStartRot + dx * 0.008;
+  }
+}, { passive: false });
+
+c.addEventListener('touchend', function(e) {
+  _activeTouches = e.touches.length;
+}, { passive: false });
+
+/* Desktop: scroll-wheel zoom + click-drag rotate */
+c.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.92 : 1.08;
+  gestureScale = Math.max(0.3, Math.min(4.0, gestureScale * delta));
+}, { passive: false });
+
+c.addEventListener('mousedown', function(e) {
+  _mouseDown = true;
+  _mouseStartX = e.clientX;
+  _mouseStartRot = gestureRotation;
+});
+window.addEventListener('mousemove', function(e) {
+  if (!_mouseDown) return;
+  const dx = e.clientX - _mouseStartX;
+  gestureRotation = _mouseStartRot + dx * 0.008;
+});
+window.addEventListener('mouseup', function() { _mouseDown = false; });
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FEATURE 3: Pause animation when tab loses focus (save battery)
+   ══════════════════════════════════════════════════════════════════════════════ */
+let animRunning = true;
+let rafId = 0;
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    animRunning = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  } else {
+    if (!animRunning) {
+      animRunning = true;
+      rafId = requestAnimationFrame(draw);
+    }
+  }
+});
+/* Also listen for window blur/focus (WebView may fire these instead) */
+window.addEventListener('blur', function() {
+  animRunning = false;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+});
+window.addEventListener('focus', function() {
+  if (!animRunning) {
+    animRunning = true;
+    rafId = requestAnimationFrame(draw);
+  }
+});
 
 /* ── Colour helpers ── */
 function hexRgb(h){
@@ -88,6 +189,32 @@ const NEBULAS=[
   ['#f5a623',0.68,0.22,0.22,0.04],
 ];
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   FEATURE 2: Bloom post-processing
+   Uses an offscreen canvas to capture emissive elements (planets + lines),
+   applies Gaussian blur, then composites with additive blending (screen).
+   ══════════════════════════════════════════════════════════════════════════════ */
+function applyBloom() {
+  /* Copy emissive elements from main canvas to bloom canvas */
+  bloomCtx.clearRect(0, 0, W, H);
+  bloomCtx.drawImage(c, 0, 0);
+
+  /* Multi-pass blur for smooth bloom */
+  bloomCtx.filter = 'blur(12px) brightness(1.6)';
+  bloomCtx.globalCompositeOperation = 'source-over';
+  bloomCtx.drawImage(bloomCanvas, 0, 0);
+  bloomCtx.filter = 'blur(6px) brightness(1.2)';
+  bloomCtx.drawImage(bloomCanvas, 0, 0);
+  bloomCtx.filter = 'none';
+
+  /* Composite bloom back onto main canvas with "screen" blending */
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = 0.45;
+  ctx.drawImage(bloomCanvas, 0, 0);
+  ctx.restore();
+}
+
 /* ── Animation loop ── */
 function draw(t){
   /* Background radial gradient */
@@ -120,12 +247,13 @@ function draw(t){
   }
 
   const n=ZONES.length;
-  if(n===0){requestAnimationFrame(draw);return;}
+  if(n===0){rafId=requestAnimationFrame(draw);return;}
 
-  /* Planet orbital parameters */
-  const OX=Math.min(W,H)*0.33;   /* semi-major axis (horizontal) */
-  const OY=OX*0.52;               /* semi-minor axis – creates depth illusion */
-  const ROT=t*0.000048;           /* very slow orbit */
+  /* Planet orbital parameters — GESTURE-AWARE */
+  const baseOrbit = Math.min(W,H)*0.33;
+  const OX = baseOrbit * gestureScale;   /* scaled by pinch gesture */
+  const OY = OX * 0.52;
+  const ROT = t * 0.000048 + gestureRotation;  /* offset by drag gesture */
 
   const planets=ZONES.map((z,i)=>{
     const base=(i/n)*Math.PI*2-Math.PI/2;
@@ -133,7 +261,7 @@ function draw(t){
     const x=CX+Math.cos(ang)*OX;
     const y=CY+Math.sin(ang)*OY;
     const z3d=(Math.sin(ang)+1)*0.5;   /* 0=back, 1=front */
-    const size=Math.min(W,H)*(0.021+z3d*0.017);
+    const size=Math.min(W,H)*(0.021+z3d*0.017)*gestureScale;
     return{x,y,z3d,size,color:z.color,ang};
   });
 
@@ -201,10 +329,13 @@ function draw(t){
     ctx.stroke();
   }
 
-  requestAnimationFrame(draw);
+  /* ── Apply bloom post-processing (Feature 2) ── */
+  applyBloom();
+
+  rafId=requestAnimationFrame(draw);
 }
 
-requestAnimationFrame(draw);
+rafId=requestAnimationFrame(draw);
 </script>
 </body>
 </html>`;
@@ -223,9 +354,29 @@ export function GalaxyCanvas({ zones = [] }: GalaxyCanvasProps) {
     return buildGalaxyHTML(effectiveZones);
   }, [zones]);
 
+  // Web platform: render via iframe since WebView is native-only
+  if (Platform.OS === "web") {
+    return (
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <iframe
+          key={key}
+          srcDoc={html}
+          style={{
+            width: "100%",
+            height: "100%",
+            border: "none",
+            backgroundColor: "#02020a",
+          }}
+          title="Galaxy Canvas"
+        />
+      </View>
+    );
+  }
+
   return (
-    // pointerEvents="none" lets all touches fall through to the RN overlays
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    // pointerEvents="box-none" lets the View pass touches through
+    // but allows the WebView child to receive gesture events (pinch/drag)
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       <WebView
         key={key}
         source={{ html }}
@@ -238,7 +389,7 @@ export function GalaxyCanvas({ zones = [] }: GalaxyCanvasProps) {
         domStorageEnabled={false}
         cacheEnabled={false}
         backgroundColor="#02020a"
-        // Prevent the WebView itself from stealing touches on Android
+        // Allow hardware acceleration for smooth gestures
         androidHardwareAccelerationDisabled={false}
         renderLoading={() => null}
         startInLoadingState={false}
