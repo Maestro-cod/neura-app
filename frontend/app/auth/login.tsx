@@ -39,7 +39,10 @@ export default function Login() {
 
   const onGoogle = async () => {
     setErr(null);
-    const redirectTo = process.env.EXPO_PUBLIC_BACKEND_URL as string;
+    // On web, redirect back to the app root after OAuth; on native, use the Expo auth proxy
+    const redirectTo = Platform.OS === "web"
+      ? window.location.origin
+      : `${process.env.EXPO_PUBLIC_SUPABASE_URL}/auth/v1/callback`;
     const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
     if (error) setErr(error.message);
   };

@@ -56,7 +56,7 @@ export function UpgradeModal({
     if (!user || !profile) return;
     setLoading(plan);
     try {
-      const backend = process.env.EXPO_PUBLIC_BACKEND_URL as string;
+      const backend = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL) as string;
       const success = `${backend}/billing-success?session_id={CHECKOUT_SESSION_ID}`;
       const cancel = `${backend}/billing-cancel`;
       const { checkout_url, session_id } = await api.createCheckoutSession({

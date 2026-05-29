@@ -34,7 +34,7 @@ export default function AIAssistant() {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
-  const isFree = profile?.plan === "free";
+  const isFree = !profile || profile.plan === "free";
 
   const send = async () => {
     if (!input.trim() || !user) return;
@@ -48,7 +48,7 @@ export default function AIAssistant() {
     setInput("");
     setSending(true);
     try {
-      const { reply } = await api.aiChat({ user_id: user.id, message: text, session_id: `chat-${user.id}` });
+      const { reply } = await api.aiChat({ user_id: user.id, message: text });
       setMessages((cur) => [...cur, { id: `a-${Date.now()}`, role: "assistant", text: reply }]);
     } catch (e: any) {
       setMessages((cur) => [...cur, { id: `a-${Date.now()}`, role: "assistant", text: "I had trouble reaching the stars. Try again in a moment." }]);

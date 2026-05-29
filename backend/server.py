@@ -1,5 +1,5 @@
 """
-NEURA backend — Stripe billing, Claude AI assistant, and account management.
+NEURA backend — Stripe billing, RouteLLM AI assistant, and account management.
 Supabase is the source of truth for users/profiles/tasks/zones; we use the
 service-role client only for trusted server-side writes (webhook, deletion).
 """
@@ -16,7 +16,7 @@ from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import stripe
 from supabase import create_client, Client
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from openai import AsyncOpenAI
 
 from auth import get_current_user, require_self
 
@@ -35,10 +35,18 @@ STRIPE_PRO_PRICE_ID = os.environ["STRIPE_PRO_PRICE_ID"]
 STRIPE_FAMILY_PRICE_ID = os.environ["STRIPE_FAMILY_PRICE_ID"]
 # Webhook secret is mandatory — server refuses to start without it
 STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
-EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
+ROUTELLM_API_KEY = os.environ["ROUTELLM_API_KEY"]
+ROUTELLM_BASE_URL = os.environ.get("ROUTELLM_BASE_URL", "https://routellm.abacus.ai/v1")
+ROUTELLM_MODEL = os.environ.get("ROUTELLM_MODEL", "claude-sonnet-4-6")
 
 stripe.api_key = STRIPE_SECRET_KEY
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+# RouteLLM client (OpenAI-compatible)
+llm_client = AsyncOpenAI(
+    api_key=ROUTELLM_API_KEY,
+    base_url=ROUTELLM_BASE_URL,
+)
 
 
 app = FastAPI(title="NEURA API")
@@ -316,16 +324,17 @@ async def ai_chat(
     require_self(current_user, payload.user_id)
     if not payload.message.strip():
         raise HTTPException(400, "Empty message")
-    # session_id is always derived server-side — never trust client input
-    session_id = f"neura-{current_user}"
     try:
         system = build_system_prompt(payload.user_id)
-        chat = (
-            LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system)
-            .with_model("anthropic", "claude-sonnet-4-5-20250929")
-            .with_params(max_tokens=800)
+        response = await llm_client.chat.completions.create(
+            model=ROUTELLM_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": payload.message},
+            ],
+            max_tokens=800,
         )
-        reply = await chat.send_message(UserMessage(text=payload.message))
+        reply = response.choices[0].message.content
         return {"reply": reply}
     except Exception as e:
         logger.exception("AI chat error")
@@ -351,13 +360,16 @@ async def ai_insight(
     urgency = top.get("urgency", "low")
     try:
         system = "You are NEURA, a calm assistant. Reply with ONE short sentence (max 16 words) of practical advice or encouragement for the user's most urgent task. No emojis."
-        chat = (
-            LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"insight-{payload.user_id}", system_message=system)
-            .with_model("anthropic", "claude-sonnet-4-5-20250929")
-            .with_params(max_tokens=80)
-        )
         msg = f"Most urgent task: '{title}' (urgency: {urgency}). Give me one short, calm tip."
-        tip = await chat.send_message(UserMessage(text=msg))
+        response = await llm_client.chat.completions.create(
+            model=ROUTELLM_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": msg},
+            ],
+            max_tokens=80,
+        )
+        tip = response.choices[0].message.content
         return {"insight": tip.strip(), "task_title": title, "urgency": urgency}
     except Exception as e:
         logger.warning("AI insight fallback: %s", e)

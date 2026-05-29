@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -31,6 +31,13 @@ export default function Settings() {
   const [upgrade, setUpgrade] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Sync name state when profile loads asynchronously
+  useEffect(() => {
+    if (profile?.name && !name) {
+      setName(profile.name);
+    }
+  }, [profile?.name]);
+
   const saveName = async () => {
     if (!user) return;
     setSavingName(true);
@@ -45,7 +52,7 @@ export default function Settings() {
     try {
       const { portal_url } = await api.openPortal({
         user_id: user.id,
-        return_url: process.env.EXPO_PUBLIC_BACKEND_URL as string,
+        return_url: Platform.OS === "web" ? window.location.origin : (process.env.EXPO_PUBLIC_API_URL as string),
       });
       if (Platform.OS === "web") {
         // @ts-ignore
@@ -61,29 +68,35 @@ export default function Settings() {
     }
   };
 
+  const doDelete = async () => {
+    if (!user) return;
+    setBusy(true);
+    try {
+      await api.deleteAccount(user.id);
+    } catch (e) {
+      // ignore — proceed to sign out
+    }
+    await signOut();
+    router.replace("/auth/login");
+  };
+
   const confirmDelete = () => {
-    Alert.alert(
-      "Delete account?",
-      "This permanently removes your profile, tasks, zones, and cancels any active subscription. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete forever",
-          style: "destructive",
-          onPress: async () => {
-            if (!user) return;
-            setBusy(true);
-            try {
-              await api.deleteAccount(user.id);
-            } catch (e) {
-              // ignore — proceed to sign out
-            }
-            await signOut();
-            router.replace("/auth/login");
-          },
-        },
-      ]
-    );
+    if (Platform.OS === "web") {
+      // Alert.alert doesn't work on web — use window.confirm
+      const confirmed = window.confirm(
+        "Delete account?\n\nThis permanently removes your profile, tasks, zones, and cancels any active subscription. This cannot be undone."
+      );
+      if (confirmed) doDelete();
+    } else {
+      Alert.alert(
+        "Delete account?",
+        "This permanently removes your profile, tasks, zones, and cancels any active subscription. This cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete forever", style: "destructive", onPress: doDelete },
+        ]
+      );
+    }
   };
 
   return (
@@ -130,14 +143,14 @@ export default function Settings() {
                 {(profile?.plan || "free").toUpperCase()}
               </Text>
             </View>
-            <View style={[styles.planBadge, { borderColor: profile?.plan === "free" ? colors.glassBorderStrong : colors.gradientStart }]}>
-              <Text style={{ color: profile?.plan === "free" ? colors.textDim : colors.gradientStart, fontFamily: fonts.bodyBold, fontSize: 11 }}>
-                {profile?.plan === "free" ? "FREE" : profile?.plan === "pro" ? "PRO · €9/mo" : "FAMILY · €15/mo"}
+            <View style={[styles.planBadge, { borderColor: (!profile || profile.plan === "free") ? colors.glassBorderStrong : colors.gradientStart }]}>
+              <Text style={{ color: (!profile || profile.plan === "free") ? colors.textDim : colors.gradientStart, fontFamily: fonts.bodyBold, fontSize: 11 }}>
+                {(!profile || profile.plan === "free") ? "FREE" : profile.plan === "pro" ? "PRO · €9/mo" : "FAMILY · €15/mo"}
               </Text>
             </View>
           </View>
 
-          {profile?.plan === "free" ? (
+          {(!profile || profile.plan === "free") ? (
             <PrimaryButton
               title="Upgrade plan"
               onPress={() => setUpgrade(true)}
