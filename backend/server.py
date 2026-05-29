@@ -9,9 +9,13 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
 
+# Load .env BEFORE any local imports that read os.environ at module level
+from dotenv import load_dotenv
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
 from fastapi import FastAPI, APIRouter, Request, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import stripe
@@ -19,10 +23,6 @@ from supabase import create_client, Client
 from openai import AsyncOpenAI
 
 from auth import get_current_user, require_self
-
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 logger = logging.getLogger("neura")
