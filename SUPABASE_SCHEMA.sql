@@ -10,12 +10,16 @@ create table if not exists public.profiles (
   name text,
   timezone text default 'UTC',
   plan text default 'free',
+  is_admin boolean default false,
   stripe_customer_id text,
   stripe_subscription_id text,
   onboarded boolean default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Migration: add is_admin column if table already exists
+alter table public.profiles add column if not exists is_admin boolean default false;
 
 alter table public.profiles enable row level security;
 
