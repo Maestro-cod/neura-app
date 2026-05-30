@@ -59,13 +59,22 @@ export default function Tasks() {
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const [{ data: z }, { data: t }] = await Promise.all([
-      supabase.from("zones").select("*").eq("user_id", user.id).eq("active", true),
-      supabase.from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
-    ]);
-    setZones((z as any) || []);
-    setTasks((t as any) || []);
-    setLoading(false);
+    try {
+      const [zRes, tRes] = await Promise.all([
+        supabase.from("zones").select("*").eq("user_id", user.id),
+        supabase
+          .from("tasks")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false }),
+      ]);
+      setZones((zRes.data as any) ?? []);
+      setTasks((tRes.data as any) ?? []);
+    } catch (_e) {
+      // keep previous state on network error
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useFocusEffect(

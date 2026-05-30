@@ -237,7 +237,7 @@ export default function Forecast() {
     try {
       const [forecastRes, { data: z }, { data: t }] = await Promise.all([
         api.forecast(user.id),
-        supabase.from("zones").select("*").eq("user_id", user.id).eq("active", true),
+        supabase.from("zones").select("*").eq("user_id", user.id),
         supabase.from("tasks").select("id, zone_id, completed").eq("user_id", user.id),
       ]);
       setDays(forecastRes.forecast ?? []);

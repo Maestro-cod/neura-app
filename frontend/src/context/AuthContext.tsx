@@ -31,6 +31,52 @@ const AuthContext = createContext<AuthCtx>({
   signOut: async () => {},
 });
 
+// ── Default zones auto-created for every new user ────────────────────────────
+const DEFAULT_ZONES = [
+  { name: "Work",    emoji: "🧠", color: "#00D4FF" },
+  { name: "Home",    emoji: "🏠", color: "#FF9500" },
+  { name: "Health",  emoji: "❤️", color: "#00FF88" },
+  { name: "Finance", emoji: "💰", color: "#FFD700" },
+  { name: "Family",  emoji: "👨‍👩‍👧", color: "#FF6B6B" },
+  { name: "Self",    emoji: "🌱", color: "#8B5CF6" },
+] as const;
+
+/**
+ * Ensures the user has at least the 6 default life zones.
+ * Called once after profile is loaded; skips if zones already exist.
+ */
+async function ensureDefaultZones(uid: string): Promise<void> {
+  try {
+    const { data: existing, error } = await supabase
+      .from("zones")
+      .select("id")
+      .eq("user_id", uid)
+      .limit(1);
+
+    if (error) {
+      console.warn("ensureDefaultZones: check failed", error.message);
+      return;
+    }
+
+    // User already has zones — nothing to do
+    if (existing && existing.length > 0) return;
+
+    // Insert the 6 default zones
+    const rows = DEFAULT_ZONES.map((z) => ({
+      user_id: uid,
+      name: z.name,
+      emoji: z.emoji,
+      color: z.color,
+    }));
+    const { error: insertErr } = await supabase.from("zones").insert(rows);
+    if (insertErr) {
+      console.warn("ensureDefaultZones: insert failed", insertErr.message);
+    }
+  } catch (e: any) {
+    console.warn("ensureDefaultZones: unexpected error", e?.message);
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -58,6 +104,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else {
       setProfile(data as any);
     }
+
+    // Ensure the user has default zones (idempotent — skips if zones exist)
+    await ensureDefaultZones(uid);
   }, []);
 
   const reloadProfile = useCallback(async () => {
