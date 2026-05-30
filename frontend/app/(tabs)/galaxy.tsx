@@ -8,6 +8,7 @@ import {
   Platform,
   Modal,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -187,22 +188,28 @@ export default function Galaxy() {
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const [{ data: z }, { data: t }] = await Promise.all([
-      supabase
-        .from("zones")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("active", true),
-      supabase
-        .from("tasks")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("completed", false),
-    ]);
-    setZones((z as any) || []);
-    setTasks((t as any) || []);
-    setLoading(false);
+    try {
+      const [zRes, tRes] = await Promise.all([
+        supabase.from("zones").select("*").eq("user_id", user.id),
+        supabase
+          .from("tasks")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("completed", false),
+      ]);
+      setZones((zRes.data as any) ?? []);
+      setTasks((tRes.data as any) ?? []);
+    } catch (_e) {
+      // keep previous state on network error
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
+
+  // Re-fetch when user auth resolves (not only on focus)
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -296,15 +303,21 @@ export default function Galaxy() {
         style={styles.topOverlay}
         pointerEvents="box-none"
       >
-        <View style={styles.topBar} pointerEvents="auto">
-          <View style={{ flex: 1 }}>
-            <Text style={styles.greeting}>
-              {getGreeting()}, {profile?.name || "Explorer"}
-            </Text>
-            <Text style={styles.appName}>NEURA</Text>
+        <LinearGradient
+          colors={["rgba(5,5,8,0.92)", "rgba(5,5,8,0.6)", "transparent"]}
+          style={styles.topGradient}
+          pointerEvents="auto"
+        >
+          <View style={styles.topBar}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.greeting}>
+                {getGreeting()}, {profile?.name || "Explorer"}
+              </Text>
+              <Text style={styles.appName}>NEURA</Text>
+            </View>
+            {!loading && <CircularProgress score={mentalLoad} />}
           </View>
-          {!loading && <CircularProgress score={mentalLoad} />}
-        </View>
+        </LinearGradient>
       </SafeAreaView>
 
       {/* ── Bottom Overlay: AI Insight bar ── */}
@@ -417,12 +430,15 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
   },
+  topGradient: {
+    paddingBottom: spacing.xl,
+  },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
   greeting: {

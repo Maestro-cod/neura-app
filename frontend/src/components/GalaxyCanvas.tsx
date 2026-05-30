@@ -18,6 +18,7 @@ import {
   Animated,
   Dimensions,
   PanResponder,
+  Platform,
   StyleSheet,
   View,
 } from "react-native";
@@ -146,6 +147,29 @@ export function GalaxyCanvas({
 
   useEffect(() => {
     mountedRef.current = true;
+
+    if (Platform.OS === "web") {
+      // Use requestAnimationFrame on web — setInterval can be throttled
+      // by browsers when the tab is backgrounded or during rapid re-renders.
+      let rafId: number;
+      let lastTime = 0;
+      const step = (time: number) => {
+        if (!mountedRef.current) return;
+        if (time - lastTime >= ANIM_INTERVAL) {
+          tickRef.current += 1;
+          setTick(tickRef.current);
+          lastTime = time;
+        }
+        rafId = requestAnimationFrame(step);
+      };
+      rafId = requestAnimationFrame(step);
+      return () => {
+        mountedRef.current = false;
+        cancelAnimationFrame(rafId);
+      };
+    }
+
+    // Native: setInterval is fine
     const interval = setInterval(() => {
       if (mountedRef.current) {
         tickRef.current += 1;
@@ -165,8 +189,8 @@ export function GalaxyCanvas({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: (evt) => {
-          const touches = evt.nativeEvent.touches;
-          if (touches && touches.length === 2) {
+          const touches = evt.nativeEvent.touches ?? [];
+          if (touches.length === 2) {
             // Start pinch
             const dx = touches[0].pageX - touches[1].pageX;
             const dy = touches[0].pageY - touches[1].pageY;
@@ -181,8 +205,8 @@ export function GalaxyCanvas({
           }
         },
         onPanResponderMove: (evt, gestureState) => {
-          const touches = evt.nativeEvent.touches;
-          if (touches && touches.length === 2) {
+          const touches = evt.nativeEvent.touches ?? [];
+          if (touches.length === 2) {
             // Pinch zoom
             const dx = touches[0].pageX - touches[1].pageX;
             const dy = touches[0].pageY - touches[1].pageY;
@@ -340,8 +364,22 @@ export function GalaxyCanvas({
   const orbitRx = planets[0]?.orbitRx || Math.min(W, H) * 0.28 * scale;
   const orbitRy = planets[0]?.orbitRy || orbitRx * 0.55;
 
+  // ── Web: mouse-wheel zoom ────────────────────────────────────────────────
+  const containerRef = useRef<View>(null);
+  useEffect(() => {
+    if (Platform.OS !== "web" || !containerRef.current) return;
+    const node = containerRef.current as unknown as HTMLElement;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.92 : 1.08;
+      scaleRef.current = Math.max(0.4, Math.min(3.0, scaleRef.current * delta));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
   return (
-    <View style={styles.container} {...panResponder.panHandlers}>
+    <View ref={containerRef} style={styles.container} {...panResponder.panHandlers}>
       <Svg width={W} height={H} style={styles.svg}>
         <Defs>
           {/* Radial gradients for planet glows */}
