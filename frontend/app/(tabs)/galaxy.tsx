@@ -5,23 +5,32 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Animated,
   Platform,
+  Modal,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Circle } from "react-native-svg";
 
 import { colors, fonts, spacing, zoneColors, zoneEmojis, ALL_ZONES } from "@/src/theme";
 import { GlassCard } from "@/src/components/GlassCard";
+import { GalaxyCanvas, GalaxyZone } from "@/src/components/GalaxyCanvas";
 import { SkeletonCard } from "@/src/components/SkeletonLoader";
+import { PrimaryButton } from "@/src/components/PrimaryButton";
 import { useAuth } from "@/src/context/AuthContext";
 import { supabase } from "@/src/lib/supabase";
 import { api } from "@/src/lib/api";
 
 type Zone = { id: string; name: string; color: string };
-type Task = { id: string; title: string; urgency: "low" | "med" | "high"; zone_id: string | null; completed: boolean; due_date: string | null };
+type Task = {
+  id: string;
+  title: string;
+  urgency: "low" | "med" | "high";
+  zone_id: string | null;
+  completed: boolean;
+  due_date: string | null;
+};
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -40,7 +49,9 @@ function getDateStr(): string {
 
 function getMentalLoadScore(tasks: Task[]): number {
   const openTasks = tasks.filter((t) => !t.completed);
-  const overdue = openTasks.filter((t) => t.due_date && new Date(t.due_date) < new Date()).length;
+  const overdue = openTasks.filter(
+    (t) => t.due_date && new Date(t.due_date) < new Date()
+  ).length;
   const score = openTasks.length * 2 + overdue * 10;
   return Math.min(100, score);
 }
@@ -52,17 +63,35 @@ function getScoreColor(score: number): string {
   return colors.stressCritical;
 }
 
-// Animated circular progress ring component
-function CircularProgress({ score, size = 140, strokeWidth = 8 }: { score: number; size?: number; strokeWidth?: number }) {
+// ── Circular progress ring component ─────────────────────────────────────────
+function CircularProgress({
+  score,
+  size = 100,
+  strokeWidth = 6,
+}: {
+  score: number;
+  size?: number;
+  strokeWidth?: number;
+}) {
   const r = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * r;
   const progress = (score / 100) * circumference;
   const color = getScoreColor(score);
 
   return (
-    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
-      <Svg width={size} height={size} style={{ transform: [{ rotate: "-90deg" }] }}>
-        {/* Background track */}
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Svg
+        width={size}
+        height={size}
+        style={{ transform: [{ rotate: "-90deg" }] }}
+      >
         <Circle
           cx={size / 2}
           cy={size / 2}
@@ -71,7 +100,6 @@ function CircularProgress({ score, size = 140, strokeWidth = 8 }: { score: numbe
           strokeWidth={strokeWidth}
           fill="none"
         />
-        {/* Progress arc */}
         <Circle
           cx={size / 2}
           cy={size / 2}
@@ -85,26 +113,91 @@ function CircularProgress({ score, size = 140, strokeWidth = 8 }: { score: numbe
       </Svg>
       <View style={{ position: "absolute", alignItems: "center" }}>
         <Text style={[styles.scoreNumber, { color }]}>{score}</Text>
-        <Text style={styles.scoreLabel}>Mental Load</Text>
+        <Text style={styles.scoreLabel}>Load</Text>
       </View>
     </View>
   );
 }
 
+// ── Zone detail bottom card ──────────────────────────────────────────────────
+function ZoneDetailCard({
+  zone,
+  taskCount,
+  onClose,
+  onViewTasks,
+}: {
+  zone: GalaxyZone;
+  taskCount: number;
+  onClose: () => void;
+  onViewTasks: () => void;
+}) {
+  const color = zone.color || zoneColors[zone.name] || "#888";
+  const emoji = zoneEmojis[zone.name] || "·";
+
+  return (
+    <GlassCard
+      strong
+      style={[
+        styles.zoneDetailCard,
+        {
+          borderLeftColor: color,
+          borderLeftWidth: 3,
+          shadowColor: color,
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.3,
+          shadowRadius: 20,
+          elevation: 10,
+        },
+      ]}
+    >
+      <View style={styles.zoneDetailHeader}>
+        <Text style={{ fontSize: 28 }}>{emoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.zoneDetailName, { color }]}>{zone.name}</Text>
+          <Text style={styles.zoneDetailCount}>
+            {taskCount} {taskCount === 1 ? "task" : "tasks"} in orbit
+          </Text>
+        </View>
+        <Pressable onPress={onClose} hitSlop={12}>
+          <Ionicons name="close" size={20} color={colors.textDim} />
+        </Pressable>
+      </View>
+      <PrimaryButton
+        title="View Tasks →"
+        onPress={onViewTasks}
+        color={color}
+        style={{ marginTop: spacing.md }}
+      />
+    </GlassCard>
+  );
+}
+
+// ── Main Galaxy Screen ───────────────────────────────────────────────────────
 export default function Galaxy() {
   const { user, profile } = useAuth();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [zones, setZones] = useState<Zone[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [insight, setInsight] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [selectedZone, setSelectedZone] = useState<GalaxyZone | null>(null);
 
+  // ── Data fetching ──────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     const [{ data: z }, { data: t }] = await Promise.all([
-      supabase.from("zones").select("*").eq("user_id", user.id).eq("active", true),
-      supabase.from("tasks").select("*").eq("user_id", user.id).eq("completed", false),
+      supabase
+        .from("zones")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("active", true),
+      supabase
+        .from("tasks")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("completed", false),
     ]);
     setZones((z as any) || []);
     setTasks((t as any) || []);
@@ -125,12 +218,19 @@ export default function Galaxy() {
       .catch(() => setInsight("Your galaxy looks balanced. Keep going."));
   }, [user, tasks.length]);
 
+  // ── Derived data ───────────────────────────────────────────────────────────
   const mentalLoad = useMemo(() => getMentalLoadScore(tasks), [tasks]);
   const scoreColor = useMemo(() => getScoreColor(mentalLoad), [mentalLoad]);
 
-  const counts: Record<string, number> = {};
-  for (const z of zones) counts[z.id] = 0;
-  for (const t of tasks) if (t.zone_id) counts[t.zone_id] = (counts[t.zone_id] || 0) + 1;
+  // Task counts per zone
+  const counts: Record<string, number> = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const z of zones) c[z.id] = 0;
+    for (const t of tasks) {
+      if (t.zone_id) c[t.zone_id] = (c[t.zone_id] || 0) + 1;
+    }
+    return c;
+  }, [zones, tasks]);
 
   // Find most loaded zone
   const mostLoadedZone = useMemo(() => {
@@ -149,154 +249,225 @@ export default function Galaxy() {
 
   const isBeforeNoon = new Date().getHours() < 12;
 
-  // Build the 6 zone slots (fixed layout)
-  const zoneSlots = ALL_ZONES.map((name) => {
-    const zone = zones.find((z) => z.name === name);
-    return {
-      name,
-      color: zoneColors[name],
-      emoji: zoneEmojis[name],
-      zone,
-      count: zone ? counts[zone.id] || 0 : 0,
-      active: !!zone,
-    };
-  });
+  // Enriched zones for the canvas
+  const canvasZones: GalaxyZone[] = useMemo(
+    () =>
+      zones.map((z) => ({
+        id: z.id,
+        name: z.name,
+        color: z.color || zoneColors[z.name] || "#888",
+      })),
+    [zones]
+  );
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  const handlePlanetTap = useCallback(
+    (zone: GalaxyZone) => {
+      setSelectedZone(zone);
+    },
+    []
+  );
+
+  const handlePlanetDoubleTap = useCallback(
+    (zone: GalaxyZone) => {
+      setSelectedZone(zone);
+    },
+    []
+  );
+
+  const handleViewTasks = useCallback(() => {
+    setSelectedZone(null);
+    router.push("/(tabs)/tasks");
+  }, [router]);
 
   return (
     <View style={styles.root}>
-      <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
-        <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Top section */}
-          <View style={styles.topSection}>
-            <Text style={styles.greeting}>{getGreeting()}, {profile?.name || "Explorer"}</Text>
+      {/* ── Full-screen Galaxy Canvas (background) ── */}
+      <GalaxyCanvas
+        zones={canvasZones}
+        taskCounts={counts}
+        onPlanetTap={handlePlanetTap}
+        onPlanetDoubleTap={handlePlanetDoubleTap}
+      />
+
+      {/* ── Top Overlay: Greeting + Mental Load ── */}
+      <SafeAreaView
+        edges={["top"]}
+        style={styles.topOverlay}
+        pointerEvents="box-none"
+      >
+        <View style={styles.topBar} pointerEvents="auto">
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greeting}>
+              {getGreeting()}, {profile?.name || "Explorer"}
+            </Text>
             <Text style={styles.appName}>NEURA</Text>
-            <Text style={styles.dateText}>{getDateStr()}</Text>
           </View>
-
-          {/* Mental Load Score Card */}
-          {loading ? (
-            <SkeletonCard style={{ marginBottom: spacing.lg }} />
-          ) : (
-            <GlassCard strong style={[styles.mentalLoadCard, { shadowColor: scoreColor }]} testID="mental-load-card">
-              <CircularProgress score={mentalLoad} />
-              <View style={styles.insightWrap}>
-                <View style={styles.insightHeader}>
-                  <Ionicons name="sparkles" size={14} color={colors.primary} />
-                  <Text style={styles.insightLabel}>AI INSIGHT</Text>
-                </View>
-                <Text style={styles.insightText}>{insight || "Analyzing your galaxy..."}</Text>
-              </View>
-            </GlassCard>
-          )}
-
-          {/* Zone Planets Grid */}
-          <Text style={styles.sectionTitle}>Zone Planets</Text>
-          <View style={styles.zonesGrid} testID="zone-sidebar">
-            {zoneSlots.map((slot) => (
-              <GlassCard
-                key={slot.name}
-                strong={slot.active}
-                style={[
-                  styles.zoneCard,
-                  !slot.active && styles.zoneCardInactive,
-                ]}
-                testID={`zone-pill-${slot.name}`}
-              >
-                <Text style={styles.zoneEmoji}>{slot.emoji}</Text>
-                <Text style={[styles.zoneCardName, { color: slot.active ? slot.color : "rgba(255,255,255,0.2)" }]}>
-                  {slot.name}
-                </Text>
-                {slot.active ? (
-                  <View style={[styles.zoneBadge, { backgroundColor: slot.color + "22" }]}>
-                    <Text style={[styles.zoneBadgeText, { color: slot.color }]}>
-                      {slot.count} {slot.count === 1 ? "task" : "tasks"}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.emptyOrbit}>Empty orbit</Text>
-                )}
-              </GlassCard>
-            ))}
-          </View>
-
-          {/* Morning Pulse Card — only before noon */}
-          {isBeforeNoon && !loading && (
-            <GlassCard
-              strong
-              style={[styles.morningPulse, {
-                shadowColor: colors.secondary,
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.3,
-                shadowRadius: 20,
-              }]}
-            >
-              <Text style={styles.morningTitle}>Morning Pulse ☀️</Text>
-              <Text style={styles.morningBody}>
-                You have {tasks.length} active {tasks.length === 1 ? "task" : "tasks"}
-                {mostLoadedZone
-                  ? `. Your most loaded zone is ${mostLoadedZone.name}.`
-                  : "."}
-              </Text>
-              <Pressable style={styles.focusButton}>
-                <Text style={styles.focusButtonText}>Start Focus</Text>
-              </Pressable>
-            </GlassCard>
-          )}
-        </ScrollView>
+          {!loading && <CircularProgress score={mentalLoad} />}
+        </View>
       </SafeAreaView>
+
+      {/* ── Bottom Overlay: AI Insight bar ── */}
+      <View
+        style={[styles.bottomOverlay, { bottom: insets.bottom + 78 }]}
+        pointerEvents="box-none"
+      >
+        <View pointerEvents="auto">
+          <GlassCard strong style={styles.insightCard} testID="ai-insight-bar">
+            <View style={styles.insightHeader}>
+              <Ionicons name="sparkles" size={14} color={colors.primary} />
+              <Text style={styles.insightLabel}>NEURA INSIGHT</Text>
+            </View>
+            <Text style={styles.insightText} testID="ai-insight-text">
+              {insight || "Analyzing your galaxy..."}
+            </Text>
+
+            {/* Morning Pulse mini-section */}
+            {isBeforeNoon && !loading && tasks.length > 0 && (
+              <View style={styles.morningPulseRow}>
+                <Text style={styles.morningText}>
+                  ☀️ {tasks.length} active{" "}
+                  {tasks.length === 1 ? "task" : "tasks"}
+                  {mostLoadedZone
+                    ? ` · Most loaded: ${mostLoadedZone.name}`
+                    : ""}
+                </Text>
+              </View>
+            )}
+          </GlassCard>
+        </View>
+      </View>
+
+      {/* ── Zone Detail Card (appears on planet tap) ── */}
+      {selectedZone && (
+        <View
+          style={[styles.zoneDetailOverlay, { bottom: insets.bottom + 78 }]}
+          pointerEvents="box-none"
+        >
+          <View pointerEvents="auto">
+            <ZoneDetailCard
+              zone={selectedZone}
+              taskCount={counts[selectedZone.id] || 0}
+              onClose={() => setSelectedZone(null)}
+              onViewTasks={handleViewTasks}
+            />
+          </View>
+        </View>
+      )}
+
+      {/* ── Zone legend (floating left sidebar) ── */}
+      <View
+        style={[styles.legendOverlay, { top: insets.top + 100 }]}
+        pointerEvents="box-none"
+        testID="zone-sidebar"
+      >
+        <View pointerEvents="auto">
+          {zones.length > 0 ? (
+            zones.map((z) => {
+              const color = z.color || zoneColors[z.name] || "#888";
+              return (
+                <Pressable
+                  key={z.id}
+                  onPress={() =>
+                    setSelectedZone({
+                      id: z.id,
+                      name: z.name,
+                      color,
+                    })
+                  }
+                  testID={`zone-pill-${z.name}`}
+                >
+                  <GlassCard
+                    strong
+                    style={styles.legendPill}
+                  >
+                    <View
+                      style={[styles.legendDot, { backgroundColor: color }]}
+                    />
+                    <Text style={[styles.legendName, { color }]}>
+                      {z.name}
+                    </Text>
+                    <Text style={[styles.legendCount, { color }]}>
+                      {counts[z.id] || 0}
+                    </Text>
+                  </GlassCard>
+                </Pressable>
+              );
+            })
+          ) : (
+            <GlassCard strong style={styles.legendPill}>
+              <Text style={styles.legendEmpty}>No zones yet</Text>
+            </GlassCard>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  scrollContent: { padding: spacing.lg },
-  topSection: { marginBottom: spacing.xl },
+
+  // Top overlay
+  topOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
   greeting: {
     color: colors.textDim,
     fontFamily: fonts.body,
-    fontSize: 14,
+    fontSize: 13,
     letterSpacing: -0.3,
   },
   appName: {
     color: colors.text,
     fontFamily: fonts.headingBlack,
-    fontSize: 36,
+    fontSize: 28,
     letterSpacing: -0.5,
-    marginTop: 2,
-  },
-  dateText: {
-    color: colors.textMuted,
-    fontFamily: fonts.body,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  mentalLoadCard: {
-    alignItems: "center",
-    gap: 16,
-    marginBottom: spacing.xl,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 30,
-    elevation: 10,
+    marginTop: 1,
   },
   scoreNumber: {
     fontFamily: fonts.headingBlack,
-    fontSize: 42,
+    fontSize: 28,
     letterSpacing: -1,
   },
   scoreLabel: {
     color: colors.textDim,
     fontFamily: fonts.bodyMed,
-    fontSize: 11,
+    fontSize: 9,
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  insightWrap: { width: "100%", paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.glassBorder },
-  insightHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
+
+  // Bottom insight overlay
+  bottomOverlay: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    zIndex: 10,
+  },
+  insightCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  insightHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
   insightLabel: {
     color: colors.primary,
     fontFamily: fonts.bodyBold,
@@ -304,92 +475,85 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   insightText: {
-    color: colors.textDim,
+    color: colors.text,
     fontFamily: fonts.body,
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 18,
+    letterSpacing: -0.2,
   },
-  sectionTitle: {
+  morningPulseRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.glassBorder,
+  },
+  morningText: {
     color: colors.textDim,
-    fontFamily: fonts.bodyBold,
-    fontSize: 12,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: spacing.md,
-  },
-  zonesGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: spacing.xl,
-  },
-  zoneCard: {
-    width: "31.5%",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    gap: 6,
-  },
-  zoneCardInactive: {
-    opacity: 0.4,
-  },
-  zoneEmoji: {
-    fontSize: 28,
-  },
-  zoneCardName: {
     fontFamily: fonts.bodyMed,
     fontSize: 12,
-    letterSpacing: -0.3,
   },
-  zoneBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 9999,
+
+  // Zone detail card
+  zoneDetailOverlay: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    zIndex: 20,
   },
-  zoneBadgeText: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 10,
+  zoneDetailCard: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  emptyOrbit: {
-    color: "rgba(255,255,255,0.15)",
-    fontFamily: fonts.body,
-    fontSize: 10,
+  zoneDetailHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
-  morningPulse: {
-    borderColor: colors.secondary + "44",
-    marginBottom: spacing.lg,
-  },
-  morningTitle: {
-    color: colors.text,
+  zoneDetailName: {
     fontFamily: fonts.heading,
-    fontSize: 18,
+    fontSize: 20,
     letterSpacing: -0.5,
-    marginBottom: 8,
   },
-  morningBody: {
+  zoneDetailCount: {
     color: colors.textDim,
     fontFamily: fonts.body,
     fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 12,
+    marginTop: 2,
   },
-  focusButton: {
-    backgroundColor: colors.secondary,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 9999,
-    alignSelf: "flex-start",
-    shadowColor: colors.secondary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 6,
+
+  // Legend sidebar
+  legendOverlay: {
+    position: "absolute",
+    left: spacing.md,
+    zIndex: 10,
+    gap: 6,
   },
-  focusButtonText: {
-    color: "#FFFFFF",
-    fontFamily: fonts.bodyBold,
-    fontSize: 13,
+  legendPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    minWidth: 90,
+  },
+  legendDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  legendName: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 11,
+    flex: 1,
     letterSpacing: -0.3,
+  },
+  legendCount: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+  },
+  legendEmpty: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 11,
   },
 });
