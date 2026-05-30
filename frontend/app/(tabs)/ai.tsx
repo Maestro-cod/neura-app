@@ -404,7 +404,7 @@ const styles = StyleSheet.create({
   },
   inputBar: {
     padding: spacing.md,
-    paddingBottom: Platform.OS === "ios" ? spacing.lg : spacing.md,
+    paddingBottom: 90,
   },
   inputWrap: {
     flexDirection: "row",

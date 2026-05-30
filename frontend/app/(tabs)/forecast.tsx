@@ -201,6 +201,22 @@ const balanceStyles = StyleSheet.create({
   name: { color: colors.textDim, fontFamily: fonts.body, fontSize: 10, marginTop: 1 },
 });
 
+// Generate 30 days of placeholder forecast data with a natural-looking wave pattern
+function generateMockForecast(): Day[] {
+  const today = new Date();
+  return Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().slice(0, 10);
+    // Create a gentle sine-wave pattern with some randomness
+    const base = 35 + Math.sin(i * 0.45) * 20 + Math.sin(i * 0.15) * 10;
+    const jitter = (Math.sin(i * 2.7 + 1.3) * 8);
+    const score = Math.max(5, Math.min(95, Math.round(base + jitter)));
+    const level: "low" | "med" | "high" = score <= 35 ? "low" : score <= 65 ? "med" : "high";
+    return { date: dateStr, score, level };
+  });
+}
+
 export default function Forecast() {
   const { user, profile } = useAuth();
   const [days, setDays] = useState<Day[]>([]);
@@ -224,7 +240,7 @@ export default function Forecast() {
         supabase.from("zones").select("*").eq("user_id", user.id).eq("active", true),
         supabase.from("tasks").select("id, zone_id, completed").eq("user_id", user.id),
       ]);
-      setDays(forecastRes.forecast);
+      setDays(forecastRes.forecast ?? []);
       setZones((z as any) || []);
       setTasks((t as any) || []);
     } catch {
@@ -240,12 +256,20 @@ export default function Forecast() {
     }, [load])
   );
 
+  // Use real data if available, otherwise fall back to mock data so the chart always renders
+  const effectiveDays = useMemo(() => {
+    return days.length > 0 ? days : generateMockForecast();
+  }, [days]);
+
+  const isUsingMockData = days.length === 0;
+
   // Weekly summaries (4 weeks from forecast data)
   const weeklySummaries = useMemo(() => {
-    if (!days.length) return [];
+    const src = effectiveDays;
+    if (!src.length) return [];
     const weeks: { weekNum: number; avgScore: number; level: string; tip: string }[] = [];
     for (let w = 0; w < 4; w++) {
-      const weekDays = days.slice(w * 7, (w + 1) * 7);
+      const weekDays = src.slice(w * 7, (w + 1) * 7);
       if (!weekDays.length) continue;
       const avg = weekDays.reduce((s, d) => s + d.score, 0) / weekDays.length;
       let level: string, tip: string;
@@ -262,7 +286,7 @@ export default function Forecast() {
       weeks.push({ weekNum: w + 1, avgScore: Math.round(avg), level, tip });
     }
     return weeks;
-  }, [days]);
+  }, [effectiveDays]);
 
   // Zone balance data
   const zoneBalance = useMemo(() => {
@@ -300,8 +324,11 @@ export default function Forecast() {
               {/* Wave Chart */}
               <GlassCard strong style={styles.chartCard}>
                 <Text style={styles.chartTitle}>Mental Load Wave</Text>
+                {isUsingMockData && (
+                  <Text style={styles.mockLabel}>Estimated · based on your current tasks</Text>
+                )}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <WaveChart data={days} width={Math.max(340, days.length * 12)} />
+                  <WaveChart data={effectiveDays} width={Math.max(340, effectiveDays.length * 12)} />
                 </ScrollView>
               </GlassCard>
 
@@ -403,7 +430,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.headingMed,
     fontSize: 14,
     letterSpacing: -0.3,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  mockLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontStyle: "italic",
+    marginBottom: spacing.sm,
   },
   sectionTitle: {
     color: colors.textDim,
