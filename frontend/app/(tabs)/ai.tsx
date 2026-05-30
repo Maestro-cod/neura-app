@@ -117,7 +117,6 @@ export default function AIAssistant() {
   const isFree = !profile || profile.plan === "free";
 
   const send = async () => {
-    const TAG = "[AI Chat]";
     if (!input.trim() || !user) return;
     if (isFree) {
       setUpgrade(true);
@@ -131,58 +130,70 @@ export default function AIAssistant() {
     setSending(true);
     try {
       // ── Pre-flight: get session token BEFORE calling the API ──
-      console.log(TAG, "Getting Supabase session…");
+      console.log("[AI Chat] Getting Supabase session…");
       const { data: { session }, error: sessErr } = await supabase.auth.getSession();
 
       if (sessErr) {
-        console.error(TAG, "getSession error:", sessErr.message);
+        console.log("[AI Chat] Error:", sessErr.message);
       }
 
-      const token = session?.access_token;
-      console.log(TAG, "Session token:", token ? `Present (${token.slice(0, 12)}…)` : "MISSING");
-      console.log(TAG, "User ID:", user.id);
+      let token = session?.access_token;
+      console.log("[AI Chat] Session token:", token ? `Present (${token.substring(0, 20)}…)` : "MISSING");
+      console.log("[AI Chat] User ID:", user.id);
 
       if (!token) {
         // Session lost — try refreshing it
-        console.warn(TAG, "No token — attempting session refresh…");
+        console.log("[AI Chat] No token — attempting session refresh…");
         const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
         if (refreshErr) {
-          console.error(TAG, "Refresh failed:", refreshErr.message);
-          throw new Error("Session expired. Please log in again.");
+          console.log("[AI Chat] Error:", refreshErr.message);
+          throw new Error("SESSION_EXPIRED");
         }
-        const refreshedToken = refreshData.session?.access_token;
-        console.log(TAG, "Refreshed token:", refreshedToken ? `Present (${refreshedToken.slice(0, 12)}…)` : "Still MISSING");
+        token = refreshData.session?.access_token;
+        console.log("[AI Chat] Refreshed token:", token ? `Present (${token.substring(0, 20)}…)` : "Still MISSING");
 
-        if (!refreshedToken) {
-          throw new Error("Session expired. Please log in again.");
+        if (!token) {
+          throw new Error("SESSION_EXPIRED");
         }
-
-        // Use refreshed token
-        console.log(TAG, "Sending message with refreshed token…");
-        const { reply } = await api.aiChat({ user_id: user.id, message: text }, refreshedToken);
-        setMessages((cur) => [
-          ...cur,
-          { id: `a-${Date.now()}`, role: "assistant", text: reply },
-        ]);
-      } else {
-        // Use the existing token
-        console.log(TAG, "Sending message with existing token…");
-        const { reply } = await api.aiChat({ user_id: user.id, message: text }, token);
-        setMessages((cur) => [
-          ...cur,
-          { id: `a-${Date.now()}`, role: "assistant", text: reply },
-        ]);
       }
-      console.log(TAG, "Message sent successfully");
-    } catch (e: any) {
-      console.error(TAG, "Error:", e?.message || e);
 
-      // Show a more specific error message
-      const errMsg = e?.message?.includes("401") || e?.message?.includes("authenticated")
-        ? "Authentication error. Please restart the app."
-        : e?.message?.includes("Backend URL")
-          ? "Server not configured. Contact support."
-          : "Connection lost. Tap to retry.";
+      // ── Call API with 10-second timeout ──
+      console.log("[AI Chat] About to call API with token:", token.substring(0, 20) + "...");
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("TIMEOUT")), 10000)
+      );
+
+      const response = await Promise.race([
+        api.aiChat({ user_id: user.id, message: text }, token),
+        timeoutPromise,
+      ]);
+
+      console.log("[AI Chat] API response received:", response);
+
+      setMessages((cur) => [
+        ...cur,
+        { id: `a-${Date.now()}`, role: "assistant", text: response.reply },
+      ]);
+      console.log("[AI Chat] Message sent successfully");
+    } catch (e: any) {
+      console.log("[AI Chat] Error:", e?.message || e);
+
+      // ── Specific error handling ──
+      let errMsg: string;
+      if (
+        e?.message === "SESSION_EXPIRED" ||
+        e?.message?.includes("401") ||
+        e?.message?.includes("authenticated")
+      ) {
+        errMsg = "Session expired. Please sign out and sign in again.";
+      } else if (e?.message === "TIMEOUT") {
+        errMsg = "Connection lost. Tap to retry.";
+      } else if (e?.message?.includes("Backend URL")) {
+        errMsg = "Server not configured. Contact support.";
+      } else {
+        errMsg = "Connection lost. Tap to retry.";
+      }
 
       setError(errMsg);
       setMessages((cur) => [
