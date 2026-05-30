@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/src/lib/supabase";
+import { zoneColors, zoneIcons, ALL_ZONES } from "@/src/theme";
 
 export type Profile = {
   id: string;
@@ -31,22 +32,21 @@ const AuthContext = createContext<AuthCtx>({
   signOut: async () => {},
 });
 
-// ── Default zones auto-created for every new user ────────────────────────────
-const DEFAULT_ZONES = [
-  { name: "Work",    emoji: "🧠", color: "#00D4FF" },
-  { name: "Home",    emoji: "🏠", color: "#FF9500" },
-  { name: "Health",  emoji: "❤️", color: "#00FF88" },
-  { name: "Finance", emoji: "💰", color: "#FFD700" },
-  { name: "Family",  emoji: "👨‍👩‍👧", color: "#FF6B6B" },
-  { name: "Self",    emoji: "🌱", color: "#8B5CF6" },
-] as const;
-
 /**
  * Ensures the user has at least the 6 default life zones.
  * Called once after profile is loaded; skips if zones already exist.
+ *
+ * ⚠ Column schema must match the onboarding flow exactly:
+ *   { user_id, name, color, icon, active }
+ *
+ * Previous bug: used a non-existent "emoji" column and omitted "active",
+ * causing the INSERT to fail silently via Supabase error response.
  */
 async function ensureDefaultZones(uid: string): Promise<void> {
+  const TAG = "[ensureDefaultZones]";
   try {
+    console.log(TAG, "checking zones for user:", uid);
+
     const { data: existing, error } = await supabase
       .from("zones")
       .select("id")
@@ -54,26 +54,41 @@ async function ensureDefaultZones(uid: string): Promise<void> {
       .limit(1);
 
     if (error) {
-      console.warn("ensureDefaultZones: check failed", error.message);
+      console.error(TAG, "SELECT failed:", error.code, error.message, error.details);
       return;
     }
 
-    // User already has zones — nothing to do
-    if (existing && existing.length > 0) return;
+    console.log(TAG, "existing zones count:", existing?.length ?? 0);
 
-    // Insert the 6 default zones
-    const rows = DEFAULT_ZONES.map((z) => ({
+    // User already has zones — nothing to do
+    if (existing && existing.length > 0) {
+      console.log(TAG, "user already has zones, skipping insert");
+      return;
+    }
+
+    // Build rows matching the exact table schema (same as onboarding.tsx)
+    const rows = ALL_ZONES.map((name) => ({
       user_id: uid,
-      name: z.name,
-      emoji: z.emoji,
-      color: z.color,
+      name,
+      color: zoneColors[name],
+      icon: zoneIcons[name],
+      active: true,
     }));
-    const { error: insertErr } = await supabase.from("zones").insert(rows);
+
+    console.log(TAG, "inserting", rows.length, "default zones:", rows.map((r) => r.name).join(", "));
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from("zones")
+      .insert(rows)
+      .select();
+
     if (insertErr) {
-      console.warn("ensureDefaultZones: insert failed", insertErr.message);
+      console.error(TAG, "INSERT failed:", insertErr.code, insertErr.message, insertErr.details, insertErr.hint);
+    } else {
+      console.log(TAG, "INSERT success:", inserted?.length ?? 0, "zones created");
     }
   } catch (e: any) {
-    console.warn("ensureDefaultZones: unexpected error", e?.message);
+    console.error(TAG, "unexpected error:", e?.message, e?.stack);
   }
 }
 

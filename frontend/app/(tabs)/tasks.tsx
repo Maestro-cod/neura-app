@@ -57,7 +57,11 @@ export default function Tasks() {
   const [activeZoneFilter, setActiveZoneFilter] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      console.log("[Tasks] load skipped — no user");
+      return;
+    }
+    console.log("[Tasks] loading data for user:", user.id);
     setLoading(true);
     try {
       const [zRes, tRes] = await Promise.all([
@@ -68,10 +72,23 @@ export default function Tasks() {
           .eq("user_id", user.id)
           .order("created_at", { ascending: false }),
       ]);
+
+      if (zRes.error) {
+        console.error("[Tasks] zones query error:", zRes.error.code, zRes.error.message);
+      } else {
+        console.log("[Tasks] zones loaded:", zRes.data?.length ?? 0, zRes.data?.map((z: any) => z.name));
+      }
+
+      if (tRes.error) {
+        console.error("[Tasks] tasks query error:", tRes.error.code, tRes.error.message);
+      } else {
+        console.log("[Tasks] tasks loaded:", tRes.data?.length ?? 0);
+      }
+
       setZones((zRes.data as any) ?? []);
       setTasks((tRes.data as any) ?? []);
-    } catch (_e) {
-      // keep previous state on network error
+    } catch (e: any) {
+      console.error("[Tasks] load exception:", e?.message);
     } finally {
       setLoading(false);
     }

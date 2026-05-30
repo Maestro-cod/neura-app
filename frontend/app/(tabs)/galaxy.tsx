@@ -186,7 +186,11 @@ export default function Galaxy() {
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      console.log("[Galaxy] load skipped — no user");
+      return;
+    }
+    console.log("[Galaxy] loading data for user:", user.id);
     setLoading(true);
     try {
       const [zRes, tRes] = await Promise.all([
@@ -197,10 +201,23 @@ export default function Galaxy() {
           .eq("user_id", user.id)
           .eq("completed", false),
       ]);
+
+      if (zRes.error) {
+        console.error("[Galaxy] zones query error:", zRes.error.code, zRes.error.message);
+      } else {
+        console.log("[Galaxy] zones loaded:", zRes.data?.length ?? 0, zRes.data?.map((z: any) => z.name));
+      }
+
+      if (tRes.error) {
+        console.error("[Galaxy] tasks query error:", tRes.error.code, tRes.error.message);
+      } else {
+        console.log("[Galaxy] tasks loaded:", tRes.data?.length ?? 0);
+      }
+
       setZones((zRes.data as any) ?? []);
       setTasks((tRes.data as any) ?? []);
-    } catch (_e) {
-      // keep previous state on network error
+    } catch (e: any) {
+      console.error("[Galaxy] load exception:", e?.message);
     } finally {
       setLoading(false);
     }
