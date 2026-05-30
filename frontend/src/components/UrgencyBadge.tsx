@@ -4,9 +4,9 @@ import { colors, fonts, urgencyColors } from "@/src/theme";
 
 export function UrgencyBadge({ urgency, testID }: { urgency: "low" | "med" | "high"; testID?: string }) {
   const color = urgencyColors[urgency];
-  const label = urgency === "med" ? "Medium" : urgency === "high" ? "High" : "Low";
+  const label = urgency === "med" ? "Medium" : urgency === "high" ? "Urgent" : "Low";
   return (
-    <View testID={testID} style={[styles.badge, { borderColor: color + "55", backgroundColor: color + "20" }]}>
+    <View testID={testID} style={[styles.badge, { borderColor: color + "44", backgroundColor: color + "15" }]}>
       <View style={[styles.dot, { backgroundColor: color }]} />
       <Text style={[styles.text, { color }]}>{label}</Text>
     </View>

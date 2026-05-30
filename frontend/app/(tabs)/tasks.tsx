@@ -9,16 +9,25 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
   RefreshControl,
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
-import { colors, fonts, radius, spacing, zoneColors, zoneIcons } from "@/src/theme";
+import {
+  colors,
+  fonts,
+  radius,
+  spacing,
+  zoneColors,
+  zoneEmojis,
+  emotionEmojis,
+  glowShadow,
+} from "@/src/theme";
 import { GlassCard } from "@/src/components/GlassCard";
 import { PrimaryButton, SecondaryButton } from "@/src/components/PrimaryButton";
-import { UrgencyBadge } from "@/src/components/UrgencyBadge";
+import { SkeletonCard } from "@/src/components/SkeletonLoader";
 import { UpgradeModal } from "@/src/components/UpgradeModal";
 import { useAuth } from "@/src/context/AuthContext";
 import { supabase } from "@/src/lib/supabase";
@@ -32,6 +41,7 @@ type Task = {
   notes: string | null;
   due_date: string | null;
   completed: boolean;
+  emotion?: string | null;
 };
 
 const FREE_TASK_LIMIT = 15;
@@ -44,6 +54,7 @@ export default function Tasks() {
   const [showAdd, setShowAdd] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
+  const [activeZoneFilter, setActiveZoneFilter] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -57,16 +68,11 @@ export default function Tasks() {
     setLoading(false);
   }, [user]);
 
-  useFocusEffect(useCallback(() => {
-    load();
-  }, [load]));
-
-  // Auto-archive completed tasks older than 24h
-  useEffect(() => {
-    const now = Date.now();
-    const stale = tasks.filter((t) => t.completed && t.id);
-    // For simplicity, leave it visible but faded; archive on next load via filter
-  }, [tasks]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const openAdd = () => {
     const openCount = tasks.filter((t) => !t.completed).length;
@@ -97,98 +103,225 @@ export default function Tasks() {
     await supabase.from("tasks").delete().eq("id", t.id);
   };
 
-  // Group by zone
-  const grouped = useMemo(() => {
-    const zMap = new Map(zones.map((z) => [z.id, z]));
-    const byZone: Record<string, { zone: Zone | null; tasks: Task[] }> = {};
-    const order: string[] = [];
-    for (const t of tasks) {
-      const key = t.zone_id || "_none";
-      if (!byZone[key]) {
-        byZone[key] = { zone: zMap.get(t.zone_id || "") || null, tasks: [] };
-        order.push(key);
-      }
-      byZone[key].tasks.push(t);
-    }
-    return { byZone, order };
-  }, [tasks, zones]);
+  const updateEmotion = async (task: Task, emotion: string) => {
+    setTasks((cur) =>
+      cur.map((x) => (x.id === task.id ? { ...x, emotion } : x))
+    );
+    await supabase.from("tasks").update({ emotion }).eq("id", task.id);
+  };
+
+  const filteredTasks = useMemo(() => {
+    if (!activeZoneFilter) return tasks;
+    return tasks.filter((t) => t.zone_id === activeZoneFilter);
+  }, [tasks, activeZoneFilter]);
+
+  const zoneMap = useMemo(() => new Map(zones.map((z) => [z.id, z])), [zones]);
+  const openCount = tasks.filter((t) => !t.completed).length;
+  const doneCount = tasks.filter((t) => t.completed).length;
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
+      {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.h1}>Tasks</Text>
-          <Text style={styles.sub}>{tasks.filter((t) => !t.completed).length} open · {tasks.filter((t) => t.completed).length} done</Text>
+          <Text style={styles.h1}>Your Orbit</Text>
+          <Text style={styles.sub}>
+            {openCount} open · {doneCount} done
+          </Text>
         </View>
-        <Pressable style={styles.fab} onPress={openAdd} testID="add-task-button">
-          <Ionicons name="add" size={20} color="#050508" />
-          <Text style={styles.fabText}>Add task</Text>
-        </Pressable>
       </View>
 
+      {/* Zone filter pills */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+      >
+        <Pressable
+          onPress={() => setActiveZoneFilter(null)}
+          style={[
+            styles.filterPill,
+            !activeZoneFilter && styles.filterPillActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.filterPillText,
+              !activeZoneFilter && { color: colors.primary },
+            ]}
+          >
+            All
+          </Text>
+        </Pressable>
+        {zones.map((z) => (
+          <Pressable
+            key={z.id}
+            onPress={() =>
+              setActiveZoneFilter(activeZoneFilter === z.id ? null : z.id)
+            }
+            style={[
+              styles.filterPill,
+              activeZoneFilter === z.id && {
+                borderColor: z.color,
+                backgroundColor: z.color + "1A",
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeZoneFilter === z.id && { color: z.color },
+              ]}
+            >
+              {zoneEmojis[z.name] || "·"} {z.name}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      {/* Task list */}
       {loading ? (
-        <ActivityIndicator color={colors.gradientStart} style={{ marginTop: 40 }} />
+        <View style={{ padding: spacing.lg }}>
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={colors.gradientStart} />}
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={load}
+              tintColor={colors.primary}
+            />
+          }
           testID="task-list-container"
         >
-          {tasks.length === 0 && (
-            <GlassCard strong>
-              <Text style={styles.emptyTitle}>Your task list is clear</Text>
-              <Text style={styles.emptySub}>Tap Add task to drop something off your mind.</Text>
-            </GlassCard>
-          )}
-          {grouped.order.map((key) => {
-            const g = grouped.byZone[key];
-            const zoneColor = g.zone ? g.zone.color : colors.textMuted;
-            const zoneName = g.zone ? g.zone.name : "Unassigned";
-            return (
-              <View key={key} style={{ marginBottom: spacing.lg }}>
-                <View style={styles.zoneHeader}>
-                  <View style={[styles.zoneStripe, { backgroundColor: zoneColor }]} />
-                  <Ionicons name={(zoneIcons[zoneName] || "ellipse-outline") as any} size={14} color={zoneColor} />
-                  <Text style={[styles.zoneTitle, { color: zoneColor }]}>{zoneName}</Text>
-                  <Text style={styles.zoneCount}>{g.tasks.length}</Text>
-                </View>
-                {g.tasks.map((t) => (
-                  <GlassCard key={t.id} style={[styles.taskCard, t.completed && { opacity: 0.45 }]} testID={`task-card-${t.id}`}>
-                    <Pressable
-                      onPress={() => toggleComplete(t)}
-                      style={styles.checkBox}
-                      testID={`task-toggle-${t.id}`}
-                    >
-                      <Ionicons
-                        name={t.completed ? "checkmark-circle" : "ellipse-outline"}
-                        size={22}
-                        color={t.completed ? zoneColor : colors.textDim}
-                      />
-                    </Pressable>
-                    <Pressable style={{ flex: 1 }} onPress={() => openEdit(t)}>
-                      <Text style={[styles.taskTitle, t.completed && { textDecorationLine: "line-through" }]}>
-                        {t.title}
-                      </Text>
-                      <View style={styles.metaRow}>
-                        <UrgencyBadge urgency={t.urgency} />
-                        {t.due_date && (
-                          <View style={styles.dueRow}>
-                            <Ionicons name="time-outline" size={11} color={colors.textDim} />
-                            <Text style={styles.dueText}>{new Date(t.due_date).toLocaleDateString()}</Text>
-                          </View>
-                        )}
-                      </View>
-                    </Pressable>
-                    <Pressable onPress={() => removeTask(t)} hitSlop={10} testID={`task-delete-${t.id}`}>
-                      <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-                    </Pressable>
-                  </GlassCard>
-                ))}
+          {filteredTasks.length === 0 && (
+            <View style={styles.emptyState}>
+              {/* Orbit rings illustration */}
+              <View style={styles.orbitRings}>
+                <View style={[styles.orbitRing, { width: 120, height: 120 }]} />
+                <View style={[styles.orbitRing, { width: 80, height: 80 }]} />
+                <View style={[styles.orbitRing, { width: 40, height: 40 }]} />
               </View>
+              <Text style={styles.emptyTitle}>Your orbit is clear</Text>
+              <Text style={styles.emptySub}>
+                Tap the + button to add something to your orbit.
+              </Text>
+            </View>
+          )}
+
+          {filteredTasks.map((t) => {
+            const zone = t.zone_id ? zoneMap.get(t.zone_id) : null;
+            const zoneColor = zone?.color || colors.textMuted;
+            const emotionData = emotionEmojis.find(
+              (e) => e.key === t.emotion
+            );
+
+            return (
+              <GlassCard
+                key={t.id}
+                style={[
+                  styles.taskCard,
+                  t.completed && { opacity: 0.4 },
+                ]}
+                testID={`task-card-${t.id}`}
+              >
+                {/* Colored left edge */}
+                <View
+                  style={[styles.taskEdge, { backgroundColor: zoneColor }]}
+                />
+
+                <Pressable
+                  onPress={() => toggleComplete(t)}
+                  style={styles.checkBox}
+                  testID={`task-toggle-${t.id}`}
+                >
+                  <View
+                    style={[
+                      styles.checkCircle,
+                      t.completed && {
+                        backgroundColor: colors.success,
+                        borderColor: colors.success,
+                      },
+                    ]}
+                  >
+                    {t.completed && (
+                      <Ionicons name="checkmark" size={14} color="#050508" />
+                    )}
+                  </View>
+                </Pressable>
+
+                <Pressable style={{ flex: 1 }} onPress={() => openEdit(t)}>
+                  <Text
+                    style={[
+                      styles.taskTitle,
+                      t.completed && { textDecorationLine: "line-through" },
+                    ]}
+                  >
+                    {t.title}
+                  </Text>
+
+                  {/* Emotion tag */}
+                  {emotionData && (
+                    <Text style={styles.emotionTag}>{emotionData.emoji} {emotionData.label}</Text>
+                  )}
+
+                  <View style={styles.metaRow}>
+                    {zone && (
+                      <View
+                        style={[
+                          styles.zonePill,
+                          { backgroundColor: zoneColor + "1A", borderColor: zoneColor + "33" },
+                        ]}
+                      >
+                        <Text style={[styles.zonePillText, { color: zoneColor }]}>
+                          {zone.name}
+                        </Text>
+                      </View>
+                    )}
+                    {t.due_date && (
+                      <View style={styles.dueRow}>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={11}
+                          color={colors.textDim}
+                        />
+                        <Text style={styles.dueText}>
+                          {new Date(t.due_date).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => removeTask(t)}
+                  hitSlop={10}
+                  testID={`task-delete-${t.id}`}
+                >
+                  <Ionicons
+                    name="trash-outline"
+                    size={18}
+                    color={colors.textMuted}
+                  />
+                </Pressable>
+              </GlassCard>
             );
           })}
         </ScrollView>
       )}
+
+      {/* Floating + button */}
+      <Pressable
+        style={styles.fab}
+        onPress={openAdd}
+        testID="add-task-button"
+      >
+        <Ionicons name="add" size={28} color="#050508" />
+      </Pressable>
 
       <TaskModal
         visible={showAdd}
@@ -228,6 +361,8 @@ function TaskModal({
   const [urgency, setUrgency] = useState<"low" | "med" | "high">("med");
   const [zoneId, setZoneId] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<string>("");
+  const [emotion, setEmotion] = useState<string>("neutral");
+  const [isUrgent, setIsUrgent] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -237,24 +372,30 @@ function TaskModal({
       setUrgency(editing.urgency);
       setZoneId(editing.zone_id);
       setDueDate(editing.due_date ? editing.due_date.slice(0, 10) : "");
+      setEmotion(editing.emotion || "neutral");
+      setIsUrgent(editing.urgency === "high");
     } else if (visible) {
       setTitle("");
       setNotes("");
       setUrgency("med");
       setZoneId(zones[0]?.id || null);
       setDueDate("");
+      setEmotion("neutral");
+      setIsUrgent(false);
     }
   }, [editing, visible, zones]);
 
   const save = async () => {
     if (!user || !title.trim()) return;
     setSaving(true);
+    const finalUrgency = isUrgent ? "high" : urgency;
     const payload: any = {
       title: title.trim(),
-      urgency,
+      urgency: finalUrgency,
       zone_id: zoneId,
       notes: notes.trim() || null,
       due_date: dueDate ? new Date(dueDate).toISOString() : null,
+      emotion,
     };
     if (editing) {
       await supabase.from("tasks").update(payload).eq("id", editing.id);
@@ -268,92 +409,135 @@ function TaskModal({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ width: "100%" }}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={{ width: "100%" }}
+        >
           <View style={styles.sheet}>
-            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: spacing.md }}>
-              <Text style={[styles.h1, { flex: 1 }]}>{editing ? "Edit task" : "Add task"}</Text>
+            <View style={styles.sheetHandle} />
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: spacing.lg }}>
+              <Text style={[styles.h1, { flex: 1 }]}>
+                {editing ? "Edit task" : "New task"}
+              </Text>
               <Pressable onPress={onClose} hitSlop={10} testID="task-modal-close">
                 <Ionicons name="close" size={24} color={colors.text} />
               </Pressable>
             </View>
 
-            <Text style={styles.label}>Title</Text>
-            <TextInput
-              testID="task-title-input"
-              value={title}
-              onChangeText={setTitle}
-              placeholder="What's on your mind?"
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-            />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.label}>Title</Text>
+              <TextInput
+                testID="task-title-input"
+                value={title}
+                onChangeText={setTitle}
+                placeholder="What's on your mind?"
+                placeholderTextColor={colors.textMuted}
+                style={styles.input}
+              />
 
-            <Text style={styles.label}>Zone</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                {zones.map((z) => (
+              <Text style={styles.label}>Zone</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {zones.map((z) => (
+                    <Pressable
+                      key={z.id}
+                      onPress={() => setZoneId(z.id)}
+                      testID={`modal-zone-${z.name}`}
+                      style={[
+                        styles.chip,
+                        {
+                          borderColor: zoneId === z.id ? z.color : colors.glassBorder,
+                          backgroundColor: zoneId === z.id ? z.color + "22" : colors.glassBg,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: zoneId === z.id ? z.color : colors.textDim,
+                          fontFamily: fonts.bodyMed,
+                          fontSize: 12,
+                        }}
+                      >
+                        {zoneEmojis[z.name] || ""} {z.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+
+              <Text style={styles.label}>Due date (YYYY-MM-DD, optional)</Text>
+              <TextInput
+                testID="task-due-input"
+                value={dueDate}
+                onChangeText={setDueDate}
+                placeholder="2026-06-15"
+                placeholderTextColor={colors.textMuted}
+                style={styles.input}
+                autoCapitalize="none"
+              />
+
+              <Text style={styles.label}>How does this feel?</Text>
+              <View style={styles.emotionRow}>
+                {emotionEmojis.map((e) => (
                   <Pressable
-                    key={z.id}
-                    onPress={() => setZoneId(z.id)}
-                    testID={`modal-zone-${z.name}`}
+                    key={e.key}
+                    onPress={() => setEmotion(e.key)}
                     style={[
-                      styles.chip,
-                      {
-                        borderColor: zoneId === z.id ? z.color : colors.glassBorder,
-                        backgroundColor: zoneId === z.id ? z.color + "22" : colors.glassBg,
-                      },
+                      styles.emotionBtn,
+                      emotion === e.key && styles.emotionBtnActive,
                     ]}
                   >
-                    <Text style={{ color: zoneId === z.id ? z.color : colors.textDim, fontFamily: fonts.bodyMed, fontSize: 12 }}>
-                      {z.name}
+                    <Text style={{ fontSize: 22 }}>{e.emoji}</Text>
+                    <Text
+                      style={[
+                        styles.emotionBtnLabel,
+                        emotion === e.key && { color: colors.primary },
+                      ]}
+                    >
+                      {e.label}
                     </Text>
                   </Pressable>
                 ))}
               </View>
-            </ScrollView>
 
-            <Text style={styles.label}>Urgency</Text>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {(["low", "med", "high"] as const).map((u) => (
-                <Pressable
-                  key={u}
-                  onPress={() => setUrgency(u)}
-                  testID={`modal-urgency-${u}`}
-                  style={{ opacity: urgency === u ? 1 : 0.4 }}
+              {/* Priority toggle */}
+              <Pressable
+                onPress={() => setIsUrgent(!isUrgent)}
+                style={[
+                  styles.urgentToggle,
+                  isUrgent && {
+                    borderColor: colors.danger + "66",
+                    backgroundColor: colors.danger + "1A",
+                    shadowColor: colors.danger,
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 12,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={isUrgent ? "flame" : "flame-outline"}
+                  size={18}
+                  color={isUrgent ? colors.danger : colors.textDim}
+                />
+                <Text
+                  style={[
+                    styles.urgentLabel,
+                    isUrgent && { color: colors.danger },
+                  ]}
                 >
-                  <UrgencyBadge urgency={u} />
-                </Pressable>
-              ))}
-            </View>
+                  {isUrgent ? "Urgent" : "Mark as urgent"}
+                </Text>
+              </Pressable>
 
-            <Text style={styles.label}>Due date (YYYY-MM-DD, optional)</Text>
-            <TextInput
-              testID="task-due-input"
-              value={dueDate}
-              onChangeText={setDueDate}
-              placeholder="2026-06-15"
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-              autoCapitalize="none"
-            />
-
-            <Text style={styles.label}>Notes</Text>
-            <TextInput
-              testID="task-notes-input"
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Any details..."
-              placeholderTextColor={colors.textMuted}
-              style={[styles.input, { minHeight: 70, textAlignVertical: "top" }]}
-              multiline
-            />
-
-            <PrimaryButton
-              title={editing ? "Save changes" : "Add task"}
-              onPress={save}
-              loading={saving}
-              testID="task-save-button"
-              style={{ marginTop: spacing.lg }}
-            />
+              <PrimaryButton
+                title={editing ? "Save changes" : "Add to orbit"}
+                onPress={save}
+                loading={saving}
+                testID="task-save-button"
+                style={{ marginTop: spacing.lg }}
+              />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -371,36 +555,139 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
-  h1: { color: colors.text, fontFamily: fonts.heading, fontSize: 26 },
-  sub: { color: colors.textDim, fontFamily: fonts.body, fontSize: 12, marginTop: 2 },
-  fab: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 9999,
-    backgroundColor: colors.gradientStart,
+  h1: {
+    color: colors.text,
+    fontFamily: fonts.heading,
+    fontSize: 28,
+    letterSpacing: -0.5,
   },
-  fabText: { color: "#050508", fontFamily: fonts.bodyBold, fontSize: 13 },
-  zoneHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.sm },
-  zoneStripe: { width: 3, height: 16, borderRadius: 2 },
-  zoneTitle: { fontFamily: fonts.headingMed, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", flex: 1 },
-  zoneCount: { color: colors.textDim, fontFamily: fonts.bodyMed, fontSize: 12 },
+  sub: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  filterRow: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    gap: 8,
+    flexDirection: "row",
+  },
+  filterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    backgroundColor: colors.glassBg,
+  },
+  filterPillActive: {
+    borderColor: colors.primary + "55",
+    backgroundColor: colors.primary + "1A",
+  },
+  filterPillText: {
+    color: colors.textDim,
+    fontFamily: fonts.bodyMed,
+    fontSize: 13,
+  },
+  // Empty state
+  emptyState: { alignItems: "center", paddingTop: 60 },
+  orbitRings: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 140,
+    height: 140,
+    marginBottom: 24,
+  },
+  orbitRing: {
+    position: "absolute",
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontFamily: fonts.heading,
+    fontSize: 20,
+    letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  emptySub: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 13,
+  },
+  // Task cards
   taskCard: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
     padding: 14,
     marginBottom: spacing.sm,
+    overflow: "hidden",
   },
-  checkBox: { marginTop: 2 },
-  taskTitle: { color: colors.text, fontFamily: fonts.bodyMed, fontSize: 15 },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  taskEdge: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    borderTopLeftRadius: radius.card,
+    borderBottomLeftRadius: radius.card,
+  },
+  checkBox: { marginTop: 2, marginLeft: 4 },
+  checkCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  taskTitle: {
+    color: colors.text,
+    fontFamily: fonts.bodyMed,
+    fontSize: 15,
+    letterSpacing: -0.3,
+  },
+  emotionTag: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  zonePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 9999,
+    borderWidth: 1,
+  },
+  zonePillText: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 11,
+  },
   dueRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   dueText: { color: colors.textDim, fontFamily: fonts.body, fontSize: 11 },
-  emptyTitle: { color: colors.text, fontFamily: fonts.heading, fontSize: 18 },
-  emptySub: { color: colors.textDim, fontFamily: fonts.body, fontSize: 13, marginTop: 4 },
+  // FAB
+  fab: {
+    position: "absolute",
+    bottom: 90,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  // Modal
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
   sheet: {
     backgroundColor: colors.bg,
@@ -410,18 +697,81 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
     borderTopWidth: 1,
     borderColor: colors.glassBorderStrong,
+    maxHeight: "85%",
   },
-  label: { color: colors.textDim, fontFamily: fonts.bodyMed, fontSize: 12, marginTop: spacing.md, marginBottom: 6 },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  label: {
+    color: colors.textDim,
+    fontFamily: fonts.bodyMed,
+    fontSize: 12,
+    marginTop: spacing.md,
+    marginBottom: 6,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
   input: {
     backgroundColor: colors.glassBg,
     borderColor: colors.glassBorderStrong,
     borderWidth: 1,
     color: colors.text,
     paddingHorizontal: spacing.md,
-    paddingVertical: 11,
+    paddingVertical: 12,
     borderRadius: radius.button,
     fontFamily: fonts.body,
     fontSize: 14,
   },
-  chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9999, borderWidth: 1 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 9999,
+    borderWidth: 1,
+  },
+  emotionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  emotionBtn: {
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: radius.button,
+    borderWidth: 1,
+    borderColor: "transparent",
+    flex: 1,
+  },
+  emotionBtnActive: {
+    borderColor: colors.primary + "44",
+    backgroundColor: colors.primary + "0D",
+  },
+  emotionBtnLabel: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 9,
+  },
+  urgentToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: radius.button,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    backgroundColor: colors.glassBg,
+    marginTop: spacing.md,
+  },
+  urgentLabel: {
+    color: colors.textDim,
+    fontFamily: fonts.bodyMed,
+    fontSize: 13,
+  },
 });

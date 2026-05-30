@@ -1,13 +1,19 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { fonts, urgencyColors } from "@/src/theme";
+import { fonts, colors } from "@/src/theme";
+
+function getStressColor(level: "low" | "med" | "high"): string {
+  if (level === "low") return colors.stressLow;
+  if (level === "med") return colors.stressMed;
+  return colors.stressCritical;
+}
 
 export function StressBadge({ level, testID }: { level: "low" | "med" | "high"; testID?: string }) {
-  const color = urgencyColors[level];
+  const color = getStressColor(level);
   const label = level === "med" ? "Medium" : level === "high" ? "High" : "Low";
   return (
-    <View testID={testID} style={[styles.badge, { backgroundColor: color + "22", borderColor: color + "55" }]}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
+    <View testID={testID} style={[styles.badge, { backgroundColor: color + "15", borderColor: color + "44" }]}>
+      <View style={[styles.dot, { backgroundColor: color, shadowColor: color, shadowOpacity: 0.6, shadowRadius: 4, elevation: 3 }]} />
       <Text style={[styles.text, { color }]}>Stress · {label}</Text>
     </View>
   );

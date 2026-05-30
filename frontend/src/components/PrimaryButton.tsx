@@ -1,7 +1,7 @@
 import React from "react";
-import { Pressable, Text, StyleSheet, ActivityIndicator, View, ViewStyle, StyleProp } from "react-native";
+import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle, StyleProp } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { colors, fonts, radius } from "@/src/theme";
+import { colors, fonts, radius, glowShadow } from "@/src/theme";
 
 export function PrimaryButton({
   title,
@@ -10,6 +10,7 @@ export function PrimaryButton({
   disabled,
   style,
   testID,
+  color,
 }: {
   title: string;
   onPress: () => void;
@@ -17,17 +18,24 @@ export function PrimaryButton({
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+  color?: string;
 }) {
   const isDisabled = disabled || loading;
+  const btnColor = color || colors.primary;
   return (
     <Pressable
       testID={testID}
       onPress={onPress}
       disabled={isDisabled}
-      style={({ pressed }) => [styles.wrap, { opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1 }, style]}
+      style={({ pressed }) => [
+        styles.wrap,
+        glowShadow,
+        { opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1 },
+        style,
+      ]}
     >
       <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
+        colors={[btnColor, colors.secondary]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.gradient}
@@ -73,7 +81,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: radius.button,
   },
-  label: { color: "#050508", fontFamily: fonts.bodyBold, fontSize: 15, letterSpacing: 0.2 },
+  label: {
+    color: "#050508",
+    fontFamily: fonts.bodyBold,
+    fontSize: 15,
+    letterSpacing: -0.3,
+  },
   secondary: {
     paddingVertical: 13,
     paddingHorizontal: 18,
@@ -83,5 +96,10 @@ const styles = StyleSheet.create({
     borderColor: colors.glassBorderStrong,
     backgroundColor: colors.glassBg,
   },
-  secondaryLabel: { color: colors.text, fontFamily: fonts.bodyMed, fontSize: 14 },
+  secondaryLabel: {
+    color: colors.text,
+    fontFamily: fonts.bodyMed,
+    fontSize: 14,
+    letterSpacing: -0.3,
+  },
 });

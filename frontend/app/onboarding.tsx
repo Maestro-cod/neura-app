@@ -13,7 +13,7 @@ import {
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, fonts, radius, spacing, zoneColors, ALL_ZONES, zoneIcons } from "@/src/theme";
+import { colors, fonts, radius, spacing, zoneColors, zoneEmojis, ALL_ZONES, zoneIcons } from "@/src/theme";
 import { PrimaryButton, SecondaryButton } from "@/src/components/PrimaryButton";
 import { GlassCard } from "@/src/components/GlassCard";
 import { GalaxyCanvas } from "@/src/components/GalaxyCanvas";
@@ -161,7 +161,7 @@ export default function Onboarding() {
                         ]}
                       >
                         <View style={[styles.zoneIcon, { backgroundColor: color + "33" }]}>
-                          <Ionicons name={zoneIcons[z] as any} size={20} color={color} />
+                          <Text style={{ fontSize: 22 }}>{zoneEmojis[z] || "·"}</Text>
                         </View>
                         <Text style={styles.zoneCardLabel}>{z}</Text>
                         {selected && (
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
   progressDot: { width: 40, height: 5, borderRadius: 9999 },
   step: { color: colors.textDim, fontFamily: fonts.bodyMed, fontSize: 12, textAlign: "center", marginBottom: spacing.sm },
   card: { gap: 6 },
-  h1: { color: colors.text, fontFamily: fonts.heading, fontSize: 24 },
+  h1: { color: colors.text, fontFamily: fonts.heading, fontSize: 24, letterSpacing: -0.5 },
   sub: { color: colors.textDim, fontFamily: fonts.body, fontSize: 13, marginBottom: spacing.md },
   label: { color: colors.textDim, fontFamily: fonts.bodyMed, fontSize: 12, marginTop: spacing.sm, marginBottom: 4 },
   input: {

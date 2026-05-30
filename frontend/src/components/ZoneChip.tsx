@@ -1,7 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { colors, fonts, zoneColors, zoneIcons } from "@/src/theme";
+import { colors, fonts, zoneColors, zoneEmojis } from "@/src/theme";
 
 export function ZoneChip({
   name,
@@ -17,7 +16,7 @@ export function ZoneChip({
   testID?: string;
 }) {
   const color = zoneColors[name] || "#888";
-  const icon = (zoneIcons[name] || "ellipse-outline") as any;
+  const emoji = zoneEmojis[name] || "·";
   return (
     <Pressable
       testID={testID}
@@ -26,15 +25,15 @@ export function ZoneChip({
         styles.chip,
         {
           borderColor: selected ? color : colors.glassBorder,
-          backgroundColor: selected ? color + "1F" : colors.glassBg,
+          backgroundColor: selected ? color + "1A" : colors.glassBg,
           opacity: pressed ? 0.85 : 1,
         },
       ]}
     >
-      <Ionicons name={icon} size={14} color={color} />
+      <Text style={{ fontSize: 14 }}>{emoji}</Text>
       <Text style={[styles.label, { color: selected ? color : colors.text }]}>{name}</Text>
       {typeof count === "number" && (
-        <View style={[styles.countWrap, { backgroundColor: color + "33" }]}>
+        <View style={[styles.countWrap, { backgroundColor: color + "22" }]}>
           <Text style={[styles.count, { color }]}>{count}</Text>
         </View>
       )}
@@ -52,7 +51,7 @@ const styles = StyleSheet.create({
     borderRadius: 9999,
     borderWidth: 1,
   },
-  label: { fontFamily: fonts.bodyMed, fontSize: 13 },
+  label: { fontFamily: fonts.bodyMed, fontSize: 13, letterSpacing: -0.3 },
   countWrap: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: 9999, marginLeft: 2 },
   count: { fontFamily: fonts.bodyBold, fontSize: 11 },
 });

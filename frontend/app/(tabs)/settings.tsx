@@ -9,11 +9,13 @@ import {
   Linking,
   Platform,
   TextInput,
+  Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { colors, fonts, radius, spacing } from "@/src/theme";
 import { GlassCard } from "@/src/components/GlassCard";
@@ -30,8 +32,8 @@ export default function Settings() {
   const [savingName, setSavingName] = useState(false);
   const [upgrade, setUpgrade] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [notifications, setNotifications] = useState(true);
 
-  // Sync name state when profile loads asynchronously
   useEffect(() => {
     if (profile?.name && !name) {
       setName(profile.name);
@@ -52,7 +54,10 @@ export default function Settings() {
     try {
       const { portal_url } = await api.openPortal({
         user_id: user.id,
-        return_url: Platform.OS === "web" ? window.location.origin : (process.env.EXPO_PUBLIC_API_URL as string),
+        return_url:
+          Platform.OS === "web"
+            ? window.location.origin
+            : (process.env.EXPO_PUBLIC_API_URL as string),
       });
       if (Platform.OS === "web") {
         // @ts-ignore
@@ -82,7 +87,6 @@ export default function Settings() {
 
   const confirmDelete = () => {
     if (Platform.OS === "web") {
-      // Alert.alert doesn't work on web — use window.confirm
       const confirmed = window.confirm(
         "Delete account?\n\nThis permanently removes your profile, tasks, zones, and cancels any active subscription. This cannot be undone."
       );
@@ -99,15 +103,51 @@ export default function Settings() {
     }
   };
 
+  const isPro = profile?.plan === "pro" || profile?.plan === "family";
+  const planLabel = isPro ? (profile?.plan === "family" ? "Family" : "PRO") : "Free";
+
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.header}>
         <Text style={styles.h1}>Settings</Text>
       </View>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100, gap: spacing.lg }}>
-        {/* Profile */}
-        <GlassCard strong testID="settings-profile-section">
-          <Text style={styles.sectionLabel}>Profile</Text>
+      <ScrollView
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120, gap: spacing.lg }}
+      >
+        {/* Profile Card */}
+        <GlassCard strong testID="settings-profile-section" style={styles.profileCard}>
+          <View style={styles.profileTop}>
+            <View style={styles.avatarWrap}>
+              <LinearGradient
+                colors={[colors.primary, colors.secondary]}
+                style={styles.avatarGradient}
+              >
+                <Text style={styles.avatarText}>
+                  {(profile?.name || "?").charAt(0).toUpperCase()}
+                </Text>
+              </LinearGradient>
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={styles.nameRow}>
+                <Text style={styles.profileName}>
+                  {profile?.name || "Explorer"}
+                </Text>
+                {isPro && (
+                  <View style={styles.proBadge}>
+                    <Text style={styles.proBadgeText}>✦ {planLabel}</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.profileEmail}>
+                {profile?.email || user?.email || "—"}
+              </Text>
+            </View>
+          </View>
+        </GlassCard>
+
+        {/* Account Section */}
+        <GlassCard strong>
+          <Text style={styles.sectionLabel}>ACCOUNT</Text>
           <Text style={styles.label}>Name</Text>
           <View style={styles.row}>
             <TextInput
@@ -121,99 +161,153 @@ export default function Settings() {
             <Pressable
               onPress={saveName}
               disabled={savingName || !name.trim() || name === profile?.name}
-              style={[styles.saveBtn, { opacity: savingName || !name.trim() || name === profile?.name ? 0.4 : 1 }]}
+              style={[
+                styles.saveBtn,
+                {
+                  opacity:
+                    savingName || !name.trim() || name === profile?.name
+                      ? 0.4
+                      : 1,
+                },
+              ]}
               testID="settings-name-save"
             >
               <Text style={styles.saveTxt}>Save</Text>
             </Pressable>
           </View>
-          <Text style={styles.label}>Email</Text>
-          <Text style={styles.value}>{profile?.email || user?.email || "—"}</Text>
           <Text style={styles.label}>Timezone</Text>
-          <Text style={styles.value}>{profile?.timezone || "UTC"}</Text>
+          <View style={styles.tzRow}>
+            <Ionicons name="globe-outline" size={14} color={colors.textDim} />
+            <Text style={styles.value}>{profile?.timezone || "UTC"}</Text>
+          </View>
         </GlassCard>
 
-        {/* Subscription */}
-        <GlassCard strong>
-          <Text style={styles.sectionLabel}>Subscription</Text>
+        {/* Subscription Section */}
+        <GlassCard
+          strong
+          style={[
+            styles.subCard,
+            isPro && {
+              borderColor: colors.secondary + "44",
+              shadowColor: colors.secondary,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.2,
+              shadowRadius: 20,
+            },
+          ]}
+        >
+          <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
           <View style={styles.planRow}>
             <View>
-              <Text style={styles.value}>Current plan</Text>
-              <Text style={styles.planName} testID="settings-current-plan">
-                {(profile?.plan || "free").toUpperCase()}
+              <Text style={styles.planTitle}>{planLabel}</Text>
+              <Text style={styles.planPrice}>
+                {isPro ? "€9/mo" : "Free"}
               </Text>
             </View>
-            <View style={[styles.planBadge, { borderColor: (!profile || profile.plan === "free") ? colors.glassBorderStrong : colors.gradientStart }]}>
-              <Text style={{ color: (!profile || profile.plan === "free") ? colors.textDim : colors.gradientStart, fontFamily: fonts.bodyBold, fontSize: 11 }}>
-                {(!profile || profile.plan === "free") ? "FREE" : profile.plan === "pro" ? "PRO · €9/mo" : "FAMILY · €15/mo"}
-              </Text>
-            </View>
+            {isPro && (
+              <View style={[styles.planActiveBadge]}>
+                <View style={styles.planActiveDot} />
+                <Text style={styles.planActiveText}>Active</Text>
+              </View>
+            )}
           </View>
-
-          {(!profile || profile.plan === "free") ? (
-            <PrimaryButton
-              title="Upgrade plan"
-              onPress={() => setUpgrade(true)}
+          {isPro ? (
+            <SecondaryButton
+              title="Manage Billing"
+              onPress={openPortal}
+              testID="settings-manage-subscription"
               style={{ marginTop: spacing.md }}
-              testID="settings-upgrade-button"
             />
           ) : (
-            <SecondaryButton
-              title={busy ? "Opening..." : "Manage subscription"}
-              onPress={openPortal}
-              style={{ marginTop: spacing.md }}
+            <PrimaryButton
+              title="Upgrade to PRO"
+              onPress={() => setUpgrade(true)}
               testID="settings-manage-subscription"
+              style={{ marginTop: spacing.md }}
             />
           )}
-
-          <Text style={styles.helpText}>
-            Subscriptions renew automatically. Cancel anytime from your billing portal — your access stays active
-            through the end of the current period.
-          </Text>
         </GlassCard>
 
-        {/* Legal */}
+        {/* App Section */}
         <GlassCard>
-          <Text style={styles.sectionLabel}>Legal</Text>
+          <Text style={styles.sectionLabel}>APP</Text>
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Ionicons name="notifications-outline" size={18} color={colors.textDim} />
+              <Text style={styles.settingLabel}>Notifications</Text>
+            </View>
+            <Switch
+              value={notifications}
+              onValueChange={setNotifications}
+              trackColor={{ false: "rgba(255,255,255,0.1)", true: colors.primary + "55" }}
+              thumbColor={notifications ? colors.primary : "rgba(255,255,255,0.3)"}
+            />
+          </View>
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Ionicons name="moon-outline" size={18} color={colors.textDim} />
+              <Text style={styles.settingLabel}>Theme</Text>
+            </View>
+            <View style={styles.themeBadge}>
+              <Text style={styles.themeBadgeText}>Dark</Text>
+              <Ionicons name="lock-closed" size={10} color={colors.textMuted} />
+            </View>
+          </View>
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Ionicons name="information-circle-outline" size={18} color={colors.textDim} />
+              <Text style={styles.settingLabel}>Version</Text>
+            </View>
+            <Text style={styles.versionText}>NEURA v1.0</Text>
+          </View>
+        </GlassCard>
+
+        {/* Legal Section */}
+        <GlassCard>
+          <Text style={styles.sectionLabel}>LEGAL</Text>
           <Pressable
             onPress={() => Linking.openURL("https://neura.app/privacy")}
             style={styles.linkRow}
             testID="settings-privacy"
           >
-            <Ionicons name="document-text-outline" size={16} color={colors.textDim} />
-            <Text style={styles.linkLabel}>Privacy policy</Text>
-            <Ionicons name="open-outline" size={14} color={colors.textMuted} />
+            <Ionicons name="shield-checkmark-outline" size={18} color={colors.textDim} />
+            <Text style={styles.linkLabel}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
           </Pressable>
           <Pressable
             onPress={() => Linking.openURL("https://neura.app/terms")}
             style={styles.linkRow}
             testID="settings-terms"
           >
-            <Ionicons name="document-text-outline" size={16} color={colors.textDim} />
-            <Text style={styles.linkLabel}>Terms of service</Text>
-            <Ionicons name="open-outline" size={14} color={colors.textMuted} />
+            <Ionicons name="document-text-outline" size={18} color={colors.textDim} />
+            <Text style={styles.linkLabel}>Terms of Service</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
           </Pressable>
         </GlassCard>
 
-        {/* Danger zone */}
-        <GlassCard style={{ borderColor: "#ff6b6b33" }}>
-          <Text style={[styles.sectionLabel, { color: "#ff6b6b" }]}>Account</Text>
-          <SecondaryButton
-            title="Sign out"
+        {/* Danger Zone */}
+        <GlassCard style={styles.dangerCard}>
+          <Text style={[styles.sectionLabel, { color: colors.danger }]}>DANGER ZONE</Text>
+          <Pressable
             onPress={async () => {
               await signOut();
               router.replace("/auth/login");
             }}
+            style={styles.dangerBtn}
             testID="settings-sign-out-button"
-            style={{ marginBottom: spacing.sm }}
-          />
-          <Pressable onPress={confirmDelete} style={styles.dangerBtn} testID="settings-delete-account">
-            <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
-            <Text style={styles.dangerTxt}>Delete account permanently</Text>
+          >
+            <Ionicons name="log-out-outline" size={18} color={colors.text} />
+            <Text style={styles.signOutText}>Sign out</Text>
+          </Pressable>
+          <Pressable
+            onPress={confirmDelete}
+            style={[styles.dangerBtn, styles.deleteBtn]}
+            testID="settings-delete-account"
+          >
+            <Ionicons name="trash-outline" size={18} color={colors.danger} />
+            <Text style={styles.deleteTxt}>Delete account permanently</Text>
           </Pressable>
         </GlassCard>
-
-        <Text style={styles.footerText}>NEURA · v1.0</Text>
       </ScrollView>
 
       <UpgradeModal visible={upgrade} onClose={() => setUpgrade(false)} />
@@ -223,12 +317,85 @@ export default function Settings() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
-  h1: { color: colors.text, fontFamily: fonts.heading, fontSize: 26 },
-  sectionLabel: { color: colors.textDim, fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1.4, textTransform: "uppercase", marginBottom: spacing.sm },
-  label: { color: colors.textDim, fontFamily: fonts.bodyMed, fontSize: 11, marginTop: spacing.md, marginBottom: 4 },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  h1: {
+    color: colors.text,
+    fontFamily: fonts.heading,
+    fontSize: 28,
+    letterSpacing: -0.5,
+  },
+  // Profile card
+  profileCard: { paddingVertical: 20 },
+  profileTop: { flexDirection: "row", alignItems: "center", gap: 14 },
+  avatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: "hidden",
+  },
+  avatarGradient: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    color: "#FFFFFF",
+    fontFamily: fonts.headingBlack,
+    fontSize: 24,
+  },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  profileName: {
+    color: colors.text,
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    letterSpacing: -0.5,
+  },
+  proBadge: {
+    backgroundColor: colors.primary + "22",
+    borderColor: colors.primary + "55",
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+  },
+  proBadgeText: {
+    color: colors.primary,
+    fontFamily: fonts.bodyBold,
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  profileEmail: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  // Sections
+  sectionLabel: {
+    color: colors.textDim,
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    marginBottom: spacing.md,
+  },
+  label: {
+    color: colors.textDim,
+    fontFamily: fonts.bodyMed,
+    fontSize: 11,
+    marginTop: spacing.md,
+    marginBottom: 6,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
   value: { color: colors.text, fontFamily: fonts.body, fontSize: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tzRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   input: {
     backgroundColor: colors.glassBg,
     borderColor: colors.glassBorderStrong,
@@ -240,24 +407,132 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 14,
   },
-  saveBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.button, backgroundColor: colors.gradientStart },
+  saveBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.button,
+    backgroundColor: colors.primary,
+  },
   saveTxt: { color: "#050508", fontFamily: fonts.bodyBold, fontSize: 13 },
-  planRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  planName: { color: colors.text, fontFamily: fonts.heading, fontSize: 22, marginTop: 2 },
-  planBadge: { borderWidth: 1, borderRadius: 9999, paddingHorizontal: 10, paddingVertical: 5 },
-  helpText: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 11, marginTop: spacing.md, lineHeight: 16 },
-  linkRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
-  linkLabel: { color: colors.text, fontFamily: fonts.body, fontSize: 14, flex: 1 },
+  // Subscription
+  subCard: {},
+  planRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  planTitle: {
+    color: colors.text,
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    letterSpacing: -0.5,
+  },
+  planPrice: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  planActiveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    backgroundColor: colors.success + "1A",
+  },
+  planActiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.success,
+  },
+  planActiveText: {
+    color: colors.success,
+    fontFamily: fonts.bodyMed,
+    fontSize: 11,
+  },
+  // App settings
+  settingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.glassBorder,
+  },
+  settingInfo: { flexDirection: "row", alignItems: "center", gap: 10 },
+  settingLabel: {
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 14,
+  },
+  themeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 9999,
+    backgroundColor: colors.glassBg,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+  },
+  themeBadgeText: {
+    color: colors.textDim,
+    fontFamily: fonts.bodyMed,
+    fontSize: 11,
+  },
+  versionText: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 12,
+  },
+  // Legal
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.glassBorder,
+  },
+  linkLabel: {
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    flex: 1,
+  },
+  // Danger zone
+  dangerCard: {
+    borderColor: colors.danger + "33",
+    borderWidth: 1,
+  },
   dangerBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: "#ff6b6b55",
+    gap: 8,
+    paddingVertical: 13,
     borderRadius: radius.button,
-    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: colors.glassBorderStrong,
+    backgroundColor: colors.glassBg,
+    marginBottom: spacing.sm,
   },
-  dangerTxt: { color: "#ff6b6b", fontFamily: fonts.bodyBold, fontSize: 13 },
-  footerText: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 11, textAlign: "center", marginTop: spacing.md },
+  signOutText: {
+    color: colors.text,
+    fontFamily: fonts.bodyMed,
+    fontSize: 14,
+  },
+  deleteBtn: {
+    borderColor: colors.danger + "44",
+    backgroundColor: colors.danger + "0D",
+  },
+  deleteTxt: {
+    color: colors.danger,
+    fontFamily: fonts.bodyBold,
+    fontSize: 13,
+  },
 });
