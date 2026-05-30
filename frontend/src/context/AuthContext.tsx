@@ -33,36 +33,110 @@ const AuthContext = createContext<AuthCtx>({
 });
 
 /**
+ * One-time cleanup: removes duplicate zones caused by the race condition bug.
+ * Keeps the earliest-created zone for each name, deletes later duplicates.
+ */
+async function deduplicateZones(uid: string): Promise<void> {
+  const TAG = "[deduplicateZones]";
+  try {
+    const { data: allZones, error } = await supabase
+      .from("zones")
+      .select("id, name, created_at")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: true });
+
+    if (error || !allZones) {
+      console.warn(TAG, "query failed:", error?.message);
+      return;
+    }
+
+    // Group by name and find duplicates
+    const seen = new Map<string, string>(); // name → first zone id
+    const dupeIds: string[] = [];
+    for (const z of allZones) {
+      if (seen.has(z.name)) {
+        dupeIds.push(z.id); // this is a duplicate — delete it
+      } else {
+        seen.set(z.name, z.id); // keep the first one
+      }
+    }
+
+    if (dupeIds.length === 0) {
+      console.log(TAG, "no duplicate zones found for user", uid);
+      return;
+    }
+
+    console.log(TAG, `found ${dupeIds.length} duplicate zones, deleting:`, dupeIds);
+
+    const { error: delErr } = await supabase
+      .from("zones")
+      .delete()
+      .in("id", dupeIds);
+
+    if (delErr) {
+      console.error(TAG, "DELETE failed:", delErr.code, delErr.message);
+    } else {
+      console.log(TAG, `deleted ${dupeIds.length} duplicate zones successfully`);
+    }
+  } catch (e: any) {
+    console.warn(TAG, "unexpected error:", e?.message);
+  }
+}
+
+/**
  * Ensures the user has at least the 6 default life zones.
  * Called once after profile is loaded; skips if zones already exist.
  *
  * ⚠ Column schema must match the onboarding flow exactly:
  *   { user_id, name, color, icon, active }
  *
- * Previous bug: used a non-existent "emoji" column and omitted "active",
- * causing the INSERT to fail silently via Supabase error response.
+ * Race-condition guard: loadProfile() is called from both getSession()
+ * and onAuthStateChange() on app start. Without the mutex, two concurrent
+ * calls both see 0 zones and both insert 6 → 12 duplicates.
+ * The _running promise acts as a per-user mutex so the second call awaits
+ * the first instead of running its own check+insert.
  */
+const _ensureZonesRunning = new Map<string, Promise<void>>();
+
 async function ensureDefaultZones(uid: string): Promise<void> {
+  // ── Mutex: if already in-flight for this uid, just await the same promise ──
+  const inflight = _ensureZonesRunning.get(uid);
+  if (inflight) {
+    console.log("[ensureDefaultZones] already in-flight for", uid, "— awaiting");
+    return inflight;
+  }
+
+  const work = _doEnsureDefaultZones(uid);
+  _ensureZonesRunning.set(uid, work);
+  try {
+    await work;
+  } finally {
+    _ensureZonesRunning.delete(uid);
+  }
+}
+
+async function _doEnsureDefaultZones(uid: string): Promise<void> {
   const TAG = "[ensureDefaultZones]";
   try {
     console.log(TAG, "checking zones for user:", uid);
 
+    // Fetch ALL zones for this user (not limit 1) so we can see exact count
     const { data: existing, error } = await supabase
       .from("zones")
-      .select("id")
-      .eq("user_id", uid)
-      .limit(1);
+      .select("id, name")
+      .eq("user_id", uid);
 
     if (error) {
       console.error(TAG, "SELECT failed:", error.code, error.message, error.details);
       return;
     }
 
-    console.log(TAG, "existing zones count:", existing?.length ?? 0);
+    const count = existing?.length ?? 0;
+    console.log(TAG, "existing zones count:", count);
 
     // User already has zones — nothing to do
-    if (existing && existing.length > 0) {
-      console.log(TAG, "user already has zones, skipping insert");
+    if (count > 0) {
+      console.log(TAG, `user already has ${count} zones:`, existing!.map((z: any) => z.name).join(", "), "— skipping insert");
       return;
     }
 
@@ -120,7 +194,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(data as any);
     }
 
-    // Ensure the user has default zones (idempotent — skips if zones exist)
+    // Deduplicate zones (one-time cleanup for the duplicate-creation bug),
+    // then ensure defaults exist for users with zero zones.
+    await deduplicateZones(uid);
     await ensureDefaultZones(uid);
   }, []);
 

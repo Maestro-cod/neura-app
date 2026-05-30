@@ -133,7 +133,11 @@ export default function Tasks() {
     setTasks((cur) =>
       cur.map((x) => (x.id === task.id ? { ...x, emotion } : x))
     );
-    await supabase.from("tasks").update({ emotion }).eq("id", task.id);
+    // emotion column may not exist yet — ignore errors silently
+    const { error } = await supabase.from("tasks").update({ emotion }).eq("id", task.id);
+    if (error) {
+      console.warn("[updateEmotion] failed (emotion column may not exist):", error.message);
+    }
   };
 
   const filteredTasks = useMemo(() => {
@@ -414,20 +418,63 @@ function TaskModal({
   const save = async () => {
     if (!user || !title.trim()) return;
     setSaving(true);
+    const TAG = "[Task Save]";
+
     const finalUrgency = isUrgent ? "high" : urgency;
-    const payload: any = {
+
+    // Core payload — only columns that exist in the tasks table schema:
+    //   id, user_id, zone_id, title, urgency, due_date, notes,
+    //   completed, completed_at, created_at
+    // NOTE: "emotion" column does NOT exist in the base schema.
+    //       We attempt to include it; if Supabase rejects it we retry without.
+    const corePayload: any = {
       title: title.trim(),
       urgency: finalUrgency,
       zone_id: zoneId,
       notes: notes.trim() || null,
       due_date: dueDate ? new Date(dueDate).toISOString() : null,
-      emotion,
     };
-    if (editing) {
-      await supabase.from("tasks").update(payload).eq("id", editing.id);
-    } else {
-      await supabase.from("tasks").insert({ ...payload, user_id: user.id });
+
+    // Try with emotion first (in case user ran the ALTER TABLE)
+    const fullPayload = { ...corePayload, emotion };
+
+    console.log(TAG, "user:", user.id);
+    console.log(TAG, "editing:", editing?.id ?? "new task");
+    console.log(TAG, "payload:", JSON.stringify(fullPayload, null, 2));
+
+    try {
+      if (editing) {
+        // ── UPDATE existing task ──
+        let { error } = await supabase.from("tasks").update(fullPayload).eq("id", editing.id);
+        if (error) {
+          console.warn(TAG, "UPDATE with emotion failed:", error.code, error.message, "— retrying without emotion");
+          ({ error } = await supabase.from("tasks").update(corePayload).eq("id", editing.id));
+        }
+        if (error) {
+          console.error(TAG, "UPDATE failed:", error.code, error.message, error.details, error.hint);
+        } else {
+          console.log(TAG, "UPDATE success for task:", editing.id);
+        }
+      } else {
+        // ── INSERT new task ──
+        const insertPayload = { ...fullPayload, user_id: user.id };
+        console.log(TAG, "INSERT payload:", JSON.stringify(insertPayload, null, 2));
+
+        let { data, error } = await supabase.from("tasks").insert(insertPayload).select();
+        if (error) {
+          console.warn(TAG, "INSERT with emotion failed:", error.code, error.message, "— retrying without emotion");
+          ({ data, error } = await supabase.from("tasks").insert({ ...corePayload, user_id: user.id }).select());
+        }
+        if (error) {
+          console.error(TAG, "INSERT failed:", error.code, error.message, error.details, error.hint);
+        } else {
+          console.log(TAG, "INSERT success:", data);
+        }
+      }
+    } catch (e: any) {
+      console.error(TAG, "exception:", e?.message);
     }
+
     setSaving(false);
     onSaved();
   };

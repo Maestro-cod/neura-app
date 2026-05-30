@@ -79,10 +79,14 @@ create table if not exists public.tasks (
   urgency text default 'low' check (urgency in ('low','med','high')),
   due_date timestamptz,
   notes text,
+  emotion text,                         -- optional: frustrated|anxious|excited|neutral|draining
   completed boolean default false,
   completed_at timestamptz,
   created_at timestamptz default now()
 );
+
+-- If you already created the table without 'emotion', run:
+-- ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS emotion text;
 
 create index if not exists tasks_user_idx on public.tasks(user_id);
 create index if not exists tasks_zone_idx on public.tasks(zone_id);
