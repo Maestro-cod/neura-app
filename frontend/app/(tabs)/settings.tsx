@@ -24,6 +24,14 @@ import { UpgradeModal } from "@/src/components/UpgradeModal";
 import { useAuth } from "@/src/context/AuthContext";
 import { supabase } from "@/src/lib/supabase";
 import { api } from "@/src/lib/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  requestNotificationPermission,
+  syncTaskReminders,
+  clearAllReminders,
+} from "@/src/lib/notifications";
+
+const REMINDERS_PREF_KEY = "neura.reminders.enabled";
 
 export default function Settings() {
   const router = useRouter();
@@ -32,13 +40,58 @@ export default function Settings() {
   const [savingName, setSavingName] = useState(false);
   const [upgrade, setUpgrade] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [notifications, setNotifications] = useState(true);
+  const [notifications, setNotifications] = useState(false);
 
   useEffect(() => {
     if (profile?.name && !name) {
       setName(profile.name);
     }
   }, [profile?.name]);
+
+  const syncReminders = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("tasks")
+      .select("title, due_date")
+      .eq("user_id", user.id)
+      .eq("completed", false);
+    await syncTaskReminders((data as any) || []);
+  };
+
+  // Restore the saved preference and keep reminders fresh on open (native only).
+  useEffect(() => {
+    if (Platform.OS === "web" || !user) return;
+    AsyncStorage.getItem(REMINDERS_PREF_KEY).then((pref) => {
+      if (pref === "true") {
+        setNotifications(true);
+        syncReminders();
+      }
+    });
+  }, [user]);
+
+  const toggleNotifications = async (value: boolean) => {
+    if (Platform.OS === "web") {
+      setNotifications(value);
+      return;
+    }
+    if (value) {
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        Alert.alert(
+          "Notifications blocked",
+          "Allow notifications for NEURA in your device settings to get task reminders."
+        );
+        return;
+      }
+      await syncReminders();
+      setNotifications(true);
+      await AsyncStorage.setItem(REMINDERS_PREF_KEY, "true");
+    } else {
+      await clearAllReminders();
+      setNotifications(false);
+      await AsyncStorage.setItem(REMINDERS_PREF_KEY, "false");
+    }
+  };
 
   const saveName = async () => {
     if (!user) return;
@@ -238,7 +291,7 @@ export default function Settings() {
             </View>
             <Switch
               value={notifications}
-              onValueChange={setNotifications}
+              onValueChange={toggleNotifications}
               trackColor={{ false: "rgba(255,255,255,0.1)", true: colors.primary + "55" }}
               thumbColor={notifications ? colors.primary : "rgba(255,255,255,0.3)"}
             />
