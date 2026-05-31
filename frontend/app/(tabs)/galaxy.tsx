@@ -234,13 +234,7 @@ export default function Galaxy() {
     }, [load])
   );
 
-  useEffect(() => {
-    if (!user) return;
-    api
-      .aiInsight(user.id)
-      .then((r) => setInsight(r.insight))
-      .catch(() => setInsight("Your galaxy looks balanced. Keep going."));
-  }, [user, tasks.length]);
+  // ai/insight endpoint removed — was returning 401 and blocking other API calls
 
   // ── Derived data ───────────────────────────────────────────────────────────
   const mentalLoad = useMemo(() => getMentalLoadScore(tasks), [tasks]);
