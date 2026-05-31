@@ -16,8 +16,9 @@ import { colors, fonts, radius, spacing } from "@/src/theme";
 import { GlassCard } from "@/src/components/GlassCard";
 import { UpgradeModal } from "@/src/components/UpgradeModal";
 import { useAuth } from "@/src/context/AuthContext";
-import { api } from "@/src/lib/api";
 import { supabase } from "@/src/lib/supabase";
+
+const CHAT_URL = "https://neura-backend-pixp6j.abacusai.app/api/ai/chat";
 
 type Msg = { id: string; role: "user" | "assistant"; text: string };
 
@@ -154,21 +155,33 @@ export default function AIAssistant() {
     setInput("");
     setSending(true);
     try {
-      // ── Call API — context is pre-loaded so backend skips Supabase fetches ──
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("TIMEOUT")), 90000)
-      );
+      console.log('CALLING API', user?.id, 'url:', CHAT_URL);
 
-      console.log('CALLING API', user?.id);
-      const response = await Promise.race([
-        api.aiChat({
+      // Direct fetch — bypasses api.ts entirely to eliminate all intermediate failure points.
+      const fetchPromise = fetch(CHAT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           user_id: user.id,
           message: text,
           context_zones: ctxZones.length > 0 ? ctxZones : undefined,
           context_tasks: ctxTasks.length > 0 ? ctxTasks : undefined,
         }),
-        timeoutPromise,
-      ]);
+      }).then(async (res) => {
+        console.log("[AI Chat] HTTP status:", res.status);
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error("[AI Chat] HTTP error body:", errText);
+          throw new Error(`HTTP ${res.status}: ${errText}`);
+        }
+        return res.json();
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("TIMEOUT")), 90000)
+      );
+
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
 
       console.log("[AI Chat] API response received:", response);
 
