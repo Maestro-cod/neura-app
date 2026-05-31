@@ -16,7 +16,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 from fastapi import FastAPI, APIRouter, Request, HTTPException, Header, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import stripe
@@ -570,3 +570,83 @@ app.include_router(api)
 @app.get("/")
 async def root():
     return {"service": "NEURA API", "status": "ok"}
+
+
+# ---------- Legal pages (public — required for the Google Play listing) ----------
+SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "support@neura.app")
+_EFFECTIVE = datetime.now(timezone.utc).strftime("%B %Y")
+
+
+def _legal_page(title: str, body: str) -> HTMLResponse:
+    html = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEURA — {title}</title>
+<style>
+  body {{ font-family: -apple-system, Segoe UI, Roboto, sans-serif; line-height: 1.6;
+         max-width: 720px; margin: 0 auto; padding: 32px 20px; color: #1a1a2e; }}
+  h1 {{ font-size: 26px; }} h2 {{ font-size: 18px; margin-top: 28px; }}
+  .muted {{ color: #666; font-size: 14px; }}
+  a {{ color: #0091b8; }}
+</style></head><body>
+<h1>NEURA — {title}</h1>
+<p class="muted">Last updated: {_EFFECTIVE}</p>
+{body}
+<p class="muted">Questions? Contact <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+</body></html>"""
+    return HTMLResponse(html)
+
+
+_PRIVACY_BODY = """
+<p>NEURA helps you organize tasks across life zones. This policy explains what we
+collect and why.</p>
+<h2>What we collect</h2>
+<ul>
+  <li><b>Account</b>: email and name you provide at sign-up.</li>
+  <li><b>Your content</b>: the zones, tasks, due dates, and notes you create.</li>
+  <li><b>Settings</b>: timezone and notification preferences.</li>
+</ul>
+<h2>How we use it</h2>
+<p>To provide the app, sync your data across devices, send task reminders you opt
+into, and power the in-app AI assistant for the messages you send it.</p>
+<h2>Service providers</h2>
+<ul>
+  <li><b>Supabase</b> — authentication and database storage.</li>
+  <li><b>Stripe</b> — subscription billing (we never store card numbers).</li>
+  <li><b>OpenRouter</b> — processes the text of AI-assistant messages to generate replies.</li>
+</ul>
+<h2>Your choices</h2>
+<p>You can edit or delete any task at any time, and permanently delete your account
+and all associated data from Settings → Delete account.</p>
+<h2>Data retention</h2>
+<p>We keep your data while your account is active. Deleting your account removes your
+profile, zones, tasks, and cancels any active subscription.</p>
+"""
+
+_TERMS_BODY = """
+<p>By using NEURA you agree to these terms.</p>
+<h2>The service</h2>
+<p>NEURA is a personal task and mental-load management tool. It is not medical or
+mental-health advice; for health concerns consult a qualified professional.</p>
+<h2>Your account</h2>
+<p>You are responsible for activity under your account and for keeping your login
+secure. You must be at least 16 to use NEURA.</p>
+<h2>Subscriptions</h2>
+<p>Paid plans renew automatically until cancelled. Manage or cancel anytime from
+Settings → Manage Billing. Billing is handled by Stripe.</p>
+<h2>Acceptable use</h2>
+<p>Don't misuse the service, attempt to breach security, or use it for unlawful
+purposes. We may suspend accounts that do.</p>
+<h2>Changes</h2>
+<p>We may update these terms; continued use after changes means you accept them.</p>
+"""
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy() -> HTMLResponse:
+    return _legal_page("Privacy Policy", _PRIVACY_BODY)
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_of_service() -> HTMLResponse:
+    return _legal_page("Terms of Service", _TERMS_BODY)

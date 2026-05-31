@@ -14,6 +14,7 @@ import {
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
+import { ErrorBoundary } from "@/src/components/ErrorBoundary";
 import { colors, applyThemePalette, type ThemeMode } from "@/src/theme";
 import { loadThemeMode } from "@/src/lib/theme-mode";
 
@@ -49,16 +50,18 @@ export default function RootLayout() {
   if (!(iconsLoaded || iconErr) || !fontsLoaded || !themeReady) return null;
 
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style={mode === "light" ? "dark" : "light"} />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.bg },
-          }}
-        />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <StatusBar style={mode === "light" ? "dark" : "light"} />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.bg },
+            }}
+          />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

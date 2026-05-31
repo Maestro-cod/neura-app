@@ -33,6 +33,10 @@ import {
 import { persistThemeMode, loadThemeMode } from "@/src/lib/theme-mode";
 
 const REMINDERS_PREF_KEY = "neura.reminders.enabled";
+const LEGAL_BASE =
+  process.env.EXPO_PUBLIC_API_URL ||
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  "https://neura.app";
 
 export default function Settings() {
   const router = useRouter();
@@ -462,7 +466,7 @@ export default function Settings() {
         <GlassCard>
           <Text style={styles.sectionLabel}>LEGAL</Text>
           <Pressable
-            onPress={() => Linking.openURL("https://neura.app/privacy")}
+            onPress={() => Linking.openURL(`${LEGAL_BASE}/privacy`)}
             style={styles.linkRow}
             testID="settings-privacy"
           >
@@ -471,7 +475,7 @@ export default function Settings() {
             <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
           </Pressable>
           <Pressable
-            onPress={() => Linking.openURL("https://neura.app/terms")}
+            onPress={() => Linking.openURL(`${LEGAL_BASE}/terms`)}
             style={styles.linkRow}
             testID="settings-terms"
           >

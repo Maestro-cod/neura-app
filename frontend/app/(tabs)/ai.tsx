@@ -121,7 +121,7 @@ function ParticleBackground() {
 }
 
 export default function AIAssistant() {
-  const { user, profile } = useAuth();
+  const { user, profile, session } = useAuth();
   const [messages, setMessages] = useState<Msg[]>([
     {
       id: "m0",
@@ -201,9 +201,19 @@ export default function AIAssistant() {
         .filter((m) => m.id !== "m0")
         .map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
 
+      // Attach the Supabase token (read synchronously from context — no
+      // getSession() call, which previously hung the request). A secured
+      // backend validates it; a permissive one simply ignores it.
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+
       const fetchPromise = fetch(CHAT_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           user_id: user.id,
           message: text,
