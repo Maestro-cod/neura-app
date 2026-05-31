@@ -141,6 +141,7 @@ export default function AIAssistant() {
   const isFree = false;
 
   const send = async () => {
+    console.log('SEND CALLED', input, user?.id);
     if (!input.trim() || !user) return;
     if (isFree) {
       setUpgrade(true);
@@ -158,6 +159,7 @@ export default function AIAssistant() {
         setTimeout(() => reject(new Error("TIMEOUT")), 90000)
       );
 
+      console.log('CALLING API', user?.id);
       const response = await Promise.race([
         api.aiChat({
           user_id: user.id,
