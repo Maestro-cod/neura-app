@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -46,6 +46,62 @@ type Task = {
 
 const FREE_TASK_LIMIT = 15;
 
+function SwipeableTask({
+  children,
+  onComplete,
+  onDelete,
+}: {
+  children: React.ReactNode;
+  onComplete: () => void;
+  onDelete: () => void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  const onRelease = () => {
+    const current = (translateX as any)._value;
+    if (current > 80) {
+      // Swipe right → complete
+      Animated.timing(translateX, { toValue: 400, duration: 200, useNativeDriver: true }).start(() => {
+        onComplete();
+        translateX.setValue(0);
+      });
+    } else if (current < -80) {
+      // Swipe left → delete
+      Animated.timing(translateX, { toValue: -400, duration: 200, useNativeDriver: true }).start(() => {
+        onDelete();
+        translateX.setValue(0);
+      });
+    } else {
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+    }
+  };
+
+  const { PanResponder } = require("react-native");
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_: any, g: any) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy),
+      onPanResponderMove: (_: any, g: any) => translateX.setValue(g.dx),
+      onPanResponderRelease: onRelease,
+      onPanResponderTerminate: onRelease,
+    })
+  ).current;
+
+  return (
+    <View style={{ position: "relative", marginBottom: spacing.sm }}>
+      {/* Swipe hint backgrounds */}
+      <View style={[styles.swipeBg, { left: 0, backgroundColor: colors.success + "33" }]}>
+        <Ionicons name="checkmark" size={20} color={colors.success} />
+      </View>
+      <View style={[styles.swipeBg, { right: 0, backgroundColor: colors.danger + "33", alignItems: "flex-end" }]}>
+        <Ionicons name="trash" size={20} color={colors.danger} />
+      </View>
+      <Animated.View style={{ transform: [{ translateX }] }} {...pan.panHandlers}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function Tasks() {
   const { user, profile } = useAuth();
   const [zones, setZones] = useState<Zone[]>([]);
@@ -55,6 +111,7 @@ export default function Tasks() {
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [activeZoneFilter, setActiveZoneFilter] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     if (!user) {
@@ -157,9 +214,14 @@ export default function Tasks() {
   };
 
   const filteredTasks = useMemo(() => {
-    if (!activeZoneFilter) return tasks;
-    return tasks.filter((t) => t.zone_id === activeZoneFilter);
-  }, [tasks, activeZoneFilter]);
+    let result = tasks;
+    if (activeZoneFilter) result = result.filter((t) => t.zone_id === activeZoneFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((t) => t.title.toLowerCase().includes(q));
+    }
+    return result;
+  }, [tasks, activeZoneFilter, search]);
 
   const zoneMap = useMemo(() => new Map(zones.map((z) => [z.id, z])), [zones]);
   const openCount = tasks.filter((t) => !t.completed).length;
@@ -169,12 +231,27 @@ export default function Tasks() {
     <SafeAreaView style={styles.root} edges={["top"]}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.h1}>Your Orbit</Text>
-          <Text style={styles.sub}>
-            {openCount} open · {doneCount} done
-          </Text>
+          <Text style={styles.sub}>{openCount} open · {doneCount} done</Text>
         </View>
+      </View>
+
+      {/* Search bar */}
+      <View style={styles.searchRow}>
+        <Ionicons name="search-outline" size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search tasks..."
+          placeholderTextColor={colors.textMuted}
+          style={styles.searchInput}
+        />
+        {search.length > 0 && (
+          <Pressable onPress={() => setSearch("")}>
+            <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+          </Pressable>
+        )}
       </View>
 
       {/* Zone filter pills */}
@@ -267,8 +344,12 @@ export default function Tasks() {
             );
 
             return (
-              <GlassCard
+              <SwipeableTask
                 key={t.id}
+                onComplete={() => toggleComplete(t)}
+                onDelete={() => removeTask(t)}
+              >
+              <GlassCard
                 style={[
                   styles.taskCard,
                   t.completed && { opacity: 0.4 },
@@ -355,6 +436,7 @@ export default function Tasks() {
                   />
                 </Pressable>
               </GlassCard>
+              </SwipeableTask>
             );
           })}
         </ScrollView>
@@ -656,6 +738,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.button,
+    backgroundColor: colors.glassBg,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 14,
+  },
   filterRow: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
@@ -706,13 +806,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 13,
   },
+  swipeBg: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 80,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    paddingHorizontal: 20,
+    borderRadius: radius.card,
+  },
   // Task cards
   taskCard: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
     padding: 14,
-    marginBottom: spacing.sm,
     overflow: "hidden",
   },
   taskEdge: {

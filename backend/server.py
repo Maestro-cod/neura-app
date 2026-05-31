@@ -35,19 +35,21 @@ STRIPE_PRO_PRICE_ID = os.environ["STRIPE_PRO_PRICE_ID"]
 STRIPE_FAMILY_PRICE_ID = os.environ["STRIPE_FAMILY_PRICE_ID"]
 # Webhook secret is mandatory — server refuses to start without it
 STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
-# LLM config — NVIDIA NIM (OpenAI-compatible endpoint)
-# Set NVIDIA_API_KEY in env; falls back to ROUTELLM_API_KEY for existing deployments.
-LLM_API_KEY = os.environ.get("NVIDIA_API_KEY") or os.environ.get("ROUTELLM_API_KEY", "")
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://integrate.api.nvidia.com/v1")
-LLM_MODEL = os.environ.get("LLM_MODEL", "meta/llama-3.1-8b-instruct")
+# LLM — OpenRouter primary, NVIDIA fallback
+LLM_API_KEY = (os.environ.get("OPENROUTER_API_KEY") or
+               os.environ.get("NVIDIA_API_KEY") or
+               os.environ.get("ROUTELLM_API_KEY", ""))
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
 
 stripe.api_key = STRIPE_SECRET_KEY
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# LLM client — OpenAI-compatible, works with NVIDIA NIM and RouteLLM
+# LLM client — OpenAI-compatible (OpenRouter, NVIDIA NIM, RouteLLM)
 llm_client = AsyncOpenAI(
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
+    default_headers={"HTTP-Referer": "https://neura.app", "X-Title": "NEURA"},
 )
 
 
@@ -289,10 +291,14 @@ class TaskContext(BaseModel):
     urgency: str = "low"
     due_date: Optional[str] = None
 
+class HistoryMessage(BaseModel):
+    role: str   # "user" or "assistant"
+    content: str
+
 class ChatRequest(BaseModel):
     user_id: str
     message: str
-    # Optional pre-fetched context from the client — skips Supabase round-trips
+    history: Optional[List[HistoryMessage]] = None
     context_zones: Optional[List[ZoneContext]] = None
     context_tasks: Optional[List[TaskContext]] = None
 
@@ -303,7 +309,6 @@ def build_system_prompt(
     context_tasks: Optional[List[dict]] = None,
 ) -> str:
     profile = fetch_profile(user_id) or {}
-    # Use client-provided context when available to avoid Supabase round-trips
     zones = context_zones if context_zones is not None else fetch_zones(user_id)
     tasks = context_tasks if context_tasks is not None else fetch_tasks(user_id)
 
@@ -312,6 +317,9 @@ def build_system_prompt(
         "Help the user manage tasks across life zones. Be concise, warm, and concrete.",
         "When the user feels overwhelmed, acknowledge feelings before suggesting actions.",
         "Always reference their actual tasks and zones when relevant.",
+        "To create a task for the user, include a line in your reply formatted EXACTLY as:",
+        "  CREATE_TASK: title=<title> | urgency=<low|med|high> | zone=<zone name>",
+        "Only include CREATE_TASK if the user clearly asks to add or create something.",
         "",
     ]
     name = profile.get("name") or "the user"
@@ -334,6 +342,25 @@ def build_system_prompt(
     return "\n".join(lines)
 
 
+def parse_task_action(reply: str) -> Optional[dict]:
+    """Extract CREATE_TASK instruction from AI reply if present."""
+    import re
+    match = re.search(r"CREATE_TASK:\s*title=(.+?)\s*\|\s*urgency=(\w+)\s*\|\s*zone=(.+)", reply)
+    if match:
+        return {
+            "title": match.group(1).strip(),
+            "urgency": match.group(2).strip().lower(),
+            "zone_name": match.group(3).strip(),
+        }
+    return None
+
+
+def clean_reply(reply: str) -> str:
+    """Remove the CREATE_TASK line from the user-facing reply."""
+    import re
+    return re.sub(r"\n?CREATE_TASK:.*", "", reply).strip()
+
+
 @api.post("/ai/chat")
 async def ai_chat(
     payload: ChatRequest,
@@ -346,16 +373,50 @@ async def ai_chat(
         zones = [z.dict() for z in payload.context_zones] if payload.context_zones is not None else None
         tasks = [t.dict() for t in payload.context_tasks] if payload.context_tasks is not None else None
         system = build_system_prompt(payload.user_id, context_zones=zones, context_tasks=tasks)
+
+        # Build message list with conversation history
+        messages: List[dict] = [{"role": "system", "content": system}]
+        if payload.history:
+            for h in payload.history[-12:]:  # last 12 messages for context window
+                messages.append({"role": h.role, "content": h.content})
+        messages.append({"role": "user", "content": payload.message})
+
         response = await llm_client.chat.completions.create(
             model=LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": payload.message},
-            ],
+            messages=messages,
             max_tokens=800,
         )
-        reply = response.choices[0].message.content
-        return {"reply": reply}
+        raw_reply = response.choices[0].message.content or ""
+
+        # Check if AI wants to create a task
+        task_created = None
+        action = parse_task_action(raw_reply)
+        if action:
+            try:
+                # Look up zone by name
+                zone_row = None
+                z_res = safe_table("zones").select("id,name").eq("user_id", payload.user_id).execute()
+                for z in (z_res.data or []):
+                    if z.get("name", "").lower() == action["zone_name"].lower():
+                        zone_row = z
+                        break
+                insert_data = {
+                    "user_id": payload.user_id,
+                    "title": action["title"],
+                    "urgency": action["urgency"] if action["urgency"] in ("low", "med", "high") else "med",
+                    "zone_id": zone_row["id"] if zone_row else None,
+                    "completed": False,
+                }
+                safe_table("tasks").insert(insert_data).execute()
+                task_created = action["title"]
+                logger.info("AI created task: %s for user %s", action["title"], payload.user_id)
+            except Exception as te:
+                logger.warning("Task creation failed: %s", te)
+
+        return {
+            "reply": clean_reply(raw_reply),
+            "task_created": task_created,
+        }
     except Exception as e:
         logger.exception("AI chat error")
         raise HTTPException(500, f"AI error: {e}")

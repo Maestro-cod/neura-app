@@ -103,10 +103,11 @@ export const api = {
   aiChat: (params: {
     user_id: string;
     message: string;
+    history?: { role: string; content: string }[];
     context_zones?: { name: string }[];
     context_tasks?: { title: string; urgency: string; due_date: string | null }[];
   }, token?: string) =>
-    post<{ reply: string }>("/api/ai/chat", params, { token }),
+    post<{ reply: string; task_created?: string | null }>("/api/ai/chat", params, { token }),
   aiInsight: (user_id: string, token?: string) =>
     post<{ insight: string; task_title?: string; urgency?: string }>("/api/ai/insight", { user_id }, { token }),
   forecast: (user_id: string, token?: string) =>

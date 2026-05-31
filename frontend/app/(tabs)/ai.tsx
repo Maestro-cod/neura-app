@@ -159,23 +159,24 @@ export default function AIAssistant() {
     setInput("");
     setSending(true);
     try {
-      console.log('CALLING API', user?.id, 'url:', CHAT_URL);
+      // Build history from current messages (exclude the initial greeting and errors)
+      const history = messages
+        .filter((m) => m.id !== "m0")
+        .map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
 
-      // Direct fetch — bypasses api.ts entirely to eliminate all intermediate failure points.
       const fetchPromise = fetch(CHAT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: user.id,
           message: text,
+          history: history.length > 0 ? history : undefined,
           context_zones: ctxZones.length > 0 ? ctxZones : undefined,
           context_tasks: ctxTasks.length > 0 ? ctxTasks : undefined,
         }),
       }).then(async (res) => {
-        console.log("[AI Chat] HTTP status:", res.status);
         if (!res.ok) {
           const errText = await res.text();
-          console.error("[AI Chat] HTTP error body:", errText);
           throw new Error(`HTTP ${res.status}: ${errText}`);
         }
         return res.json();
@@ -187,13 +188,23 @@ export default function AIAssistant() {
 
       const response = await Promise.race([fetchPromise, timeoutPromise]);
 
-      console.log("[AI Chat] API response received:", response);
-
+      const replyText = response.reply || "I'm here, tell me more.";
       setMessages((cur) => [
         ...cur,
-        { id: `a-${Date.now()}`, role: "assistant", text: response.reply },
+        { id: `a-${Date.now()}`, role: "assistant", text: replyText },
       ]);
-      console.log("[AI Chat] Message sent successfully");
+
+      // If AI created a task, refresh context so next message has updated tasks
+      if (response.task_created && user) {
+        supabase
+          .from("tasks")
+          .select("title, urgency, due_date")
+          .eq("user_id", user.id)
+          .eq("completed", false)
+          .order("urgency", { ascending: false })
+          .limit(20)
+          .then(({ data }) => { if (data) setCtxTasks(data as any); });
+      }
     } catch (e: any) {
       console.log("[AI Chat] ── ERROR DETAILS ──────────────────────");
       console.log("[AI Chat] name   :", e?.name);
