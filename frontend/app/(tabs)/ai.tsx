@@ -17,6 +17,7 @@ import { GlassCard } from "@/src/components/GlassCard";
 import { UpgradeModal } from "@/src/components/UpgradeModal";
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/lib/api";
+import { supabase } from "@/src/lib/supabase";
 
 type Msg = { id: string; role: "user" | "assistant"; text: string };
 
@@ -109,6 +110,29 @@ export default function AIAssistant() {
   const [upgrade, setUpgrade] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
+  // Pre-fetched context sent with every message — avoids backend DB round-trips
+  const [ctxZones, setCtxZones] = useState<{ name: string }[]>([]);
+  const [ctxTasks, setCtxTasks] = useState<{ title: string; urgency: string; due_date: string | null }[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    Promise.all([
+      supabase.from("zones").select("name").eq("user_id", user.id),
+      supabase
+        .from("tasks")
+        .select("title, urgency, due_date")
+        .eq("user_id", user.id)
+        .eq("completed", false)
+        .order("urgency", { ascending: false })
+        .limit(20),
+    ]).then(([zRes, tRes]) => {
+      if (zRes.data) setCtxZones(zRes.data as any);
+      if (tRes.data) setCtxTasks(tRes.data as any);
+    }).catch(() => {
+      // Context unavailable — backend will fetch it itself
+    });
+  }, [user]);
+
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages, sending]);
@@ -128,13 +152,18 @@ export default function AIAssistant() {
     setInput("");
     setSending(true);
     try {
-      // ── Call API with 60-second timeout (LLM fetches context from DB then calls Claude) ──
+      // ── Call API — context is pre-loaded so backend skips Supabase fetches ──
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("TIMEOUT")), 60000)
+        setTimeout(() => reject(new Error("TIMEOUT")), 90000)
       );
 
       const response = await Promise.race([
-        api.aiChat({ user_id: user.id, message: text }),
+        api.aiChat({
+          user_id: user.id,
+          message: text,
+          context_zones: ctxZones.length > 0 ? ctxZones : undefined,
+          context_tasks: ctxTasks.length > 0 ? ctxTasks : undefined,
+        }),
         timeoutPromise,
       ]);
 

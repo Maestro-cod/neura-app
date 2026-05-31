@@ -281,15 +281,31 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
 
 
 # ---------- AI Assistant ----------
+class ZoneContext(BaseModel):
+    name: str
+
+class TaskContext(BaseModel):
+    title: str
+    urgency: str = "low"
+    due_date: Optional[str] = None
+
 class ChatRequest(BaseModel):
     user_id: str
     message: str
+    # Optional pre-fetched context from the client — skips Supabase round-trips
+    context_zones: Optional[List[ZoneContext]] = None
+    context_tasks: Optional[List[TaskContext]] = None
 
 
-def build_system_prompt(user_id: str) -> str:
+def build_system_prompt(
+    user_id: str,
+    context_zones: Optional[List[dict]] = None,
+    context_tasks: Optional[List[dict]] = None,
+) -> str:
     profile = fetch_profile(user_id) or {}
-    zones = fetch_zones(user_id)
-    tasks = fetch_tasks(user_id)
+    # Use client-provided context when available to avoid Supabase round-trips
+    zones = context_zones if context_zones is not None else fetch_zones(user_id)
+    tasks = context_tasks if context_tasks is not None else fetch_tasks(user_id)
 
     lines = [
         "You are NEURA, a calm, supportive mental-load assistant.",
@@ -327,7 +343,9 @@ async def ai_chat(
     if not payload.message.strip():
         raise HTTPException(400, "Empty message")
     try:
-        system = build_system_prompt(payload.user_id)
+        zones = [z.dict() for z in payload.context_zones] if payload.context_zones is not None else None
+        tasks = [t.dict() for t in payload.context_tasks] if payload.context_tasks is not None else None
+        system = build_system_prompt(payload.user_id, context_zones=zones, context_tasks=tasks)
         response = await llm_client.chat.completions.create(
             model=LLM_MODEL,
             messages=[

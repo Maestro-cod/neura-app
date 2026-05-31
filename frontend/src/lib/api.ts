@@ -100,7 +100,12 @@ export const api = {
     post<{ portal_url: string }>("/api/billing/portal", params, { token }),
   verifySession: (params: { user_id: string; session_id: string }, token?: string) =>
     post<{ updated: boolean; plan?: string }>("/api/billing/verify-session", params, { token }),
-  aiChat: (params: { user_id: string; message: string }, token?: string) =>
+  aiChat: (params: {
+    user_id: string;
+    message: string;
+    context_zones?: { name: string }[];
+    context_tasks?: { title: string; urgency: string; due_date: string | null }[];
+  }, token?: string) =>
     post<{ reply: string }>("/api/ai/chat", params, { token }),
   aiInsight: (user_id: string, token?: string) =>
     post<{ insight: string; task_title?: string; urgency?: string }>("/api/ai/insight", { user_id }, { token }),
