@@ -19,19 +19,25 @@ if (typeof (globalThis as any).WebSocket === "undefined") {
   };
 }
 
-// In Node SSR there is no `window`, but AsyncStorage tries to access it.
-// Provide a tiny in-memory store so auth init won't crash during static render.
+// Storage routing:
+//   Node/SSR          → in-memory (no window, no localStorage)
+//   Browser (web)     → localStorage directly — avoids AsyncStorage v2's
+//                       IndexedDB init which hangs for several seconds on
+//                       first load and causes all Supabase queries to block
+//   React Native native → AsyncStorage (localStorage not available)
 const memoryStore: Record<string, string> = {};
 const safeStorage =
   typeof window === "undefined"
     ? {
         getItem: async (k: string) => memoryStore[k] ?? null,
-        setItem: async (k: string, v: string) => {
-          memoryStore[k] = v;
-        },
-        removeItem: async (k: string) => {
-          delete memoryStore[k];
-        },
+        setItem: async (k: string, v: string) => { memoryStore[k] = v; },
+        removeItem: async (k: string) => { delete memoryStore[k]; },
+      }
+    : typeof localStorage !== "undefined"
+    ? {
+        getItem: async (k: string) => localStorage.getItem(k),
+        setItem: async (k: string, v: string) => { localStorage.setItem(k, v); },
+        removeItem: async (k: string) => { localStorage.removeItem(k); },
       }
     : AsyncStorage;
 
