@@ -33,6 +33,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { supabase } from "@/src/lib/supabase";
 
 type Zone = { id: string; name: string; color: string };
+type Recurrence = "daily" | "weekly" | "monthly";
 type Task = {
   id: string;
   title: string;
@@ -42,9 +43,24 @@ type Task = {
   due_date: string | null;
   completed: boolean;
   emotion?: string | null;
+  recurrence?: Recurrence | null;
 };
 
 const FREE_TASK_LIMIT = 15;
+const RECURRENCE_LABELS: Record<Recurrence, string> = {
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+};
+
+// Next due date for a recurring task: advance from its due date (or today).
+function nextDueDate(current: string | null, recurrence: Recurrence): string {
+  const d = current ? new Date(current) : new Date();
+  if (recurrence === "daily") d.setDate(d.getDate() + 1);
+  else if (recurrence === "weekly") d.setDate(d.getDate() + 7);
+  else d.setMonth(d.getMonth() + 1);
+  return d.toISOString();
+}
 
 function SwipeableTask({
   children,
@@ -195,6 +211,23 @@ export default function Tasks() {
       .from("tasks")
       .update({ completed, completed_at: completed ? new Date().toISOString() : null })
       .eq("id", t.id);
+
+    // Recurring task just completed → spawn the next occurrence.
+    if (completed && t.recurrence && user) {
+      const { data } = await supabase
+        .from("tasks")
+        .insert({
+          user_id: user.id,
+          zone_id: t.zone_id,
+          title: t.title,
+          urgency: t.urgency,
+          notes: t.notes,
+          due_date: nextDueDate(t.due_date, t.recurrence),
+          recurrence: t.recurrence,
+        })
+        .select();
+      if (data?.[0]) setTasks((cur) => [data[0] as any, ...cur]);
+    }
   };
 
   const removeTask = async (t: Task) => {
@@ -421,6 +454,14 @@ export default function Tasks() {
                         </Text>
                       </View>
                     )}
+                    {t.recurrence && (
+                      <View style={styles.dueRow}>
+                        <Ionicons name="repeat" size={11} color={colors.primary} />
+                        <Text style={[styles.dueText, { color: colors.primary }]}>
+                          {RECURRENCE_LABELS[t.recurrence]}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </Pressable>
 
@@ -490,6 +531,7 @@ function TaskModal({
   const [zoneId, setZoneId] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<string>("");
   const [emotion, setEmotion] = useState<string>("neutral");
+  const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
   const [isUrgent, setIsUrgent] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -501,6 +543,7 @@ function TaskModal({
       setZoneId(editing.zone_id);
       setDueDate(editing.due_date ? editing.due_date.slice(0, 10) : "");
       setEmotion(editing.emotion || "neutral");
+      setRecurrence(editing.recurrence ?? null);
       setIsUrgent(editing.urgency === "high");
     } else if (visible) {
       setTitle("");
@@ -509,6 +552,7 @@ function TaskModal({
       setZoneId(zones[0]?.id || null);
       setDueDate("");
       setEmotion("neutral");
+      setRecurrence(null);
       setIsUrgent(false);
     }
   }, [editing, visible, zones]);
@@ -531,6 +575,7 @@ function TaskModal({
       zone_id: zoneId,
       notes: notes.trim() || null,
       due_date: dueDate ? new Date(dueDate).toISOString() : null,
+      recurrence,
     };
 
     // Try with emotion first (in case user ran the ALTER TABLE)
@@ -646,6 +691,41 @@ function TaskModal({
                 style={styles.input}
                 autoCapitalize="none"
               />
+
+              <Text style={styles.label}>Repeat</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {([null, "daily", "weekly", "monthly"] as (Recurrence | null)[]).map(
+                  (r) => {
+                    const active = recurrence === r;
+                    return (
+                      <Pressable
+                        key={r ?? "none"}
+                        onPress={() => setRecurrence(r)}
+                        testID={`task-recurrence-${r ?? "none"}`}
+                        style={[
+                          styles.chip,
+                          {
+                            borderColor: active ? colors.primary : colors.glassBorder,
+                            backgroundColor: active
+                              ? colors.primary + "22"
+                              : colors.glassBg,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            color: active ? colors.primary : colors.textDim,
+                            fontFamily: fonts.bodyMed,
+                            fontSize: 12,
+                          }}
+                        >
+                          {r ? RECURRENCE_LABELS[r] : "None"}
+                        </Text>
+                      </Pressable>
+                    );
+                  }
+                )}
+              </View>
 
               <Text style={styles.label}>How does this feel?</Text>
               <View style={styles.emotionRow}>

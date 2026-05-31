@@ -80,13 +80,16 @@ create table if not exists public.tasks (
   due_date timestamptz,
   notes text,
   emotion text,                         -- optional: frustrated|anxious|excited|neutral|draining
+  recurrence text check (recurrence is null or recurrence in ('daily','weekly','monthly')),
   completed boolean default false,
   completed_at timestamptz,
   created_at timestamptz default now()
 );
 
--- If you already created the table without 'emotion', run:
+-- If you already created the table without these columns, run:
 -- ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS emotion text;
+-- ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS recurrence text
+--   CHECK (recurrence IS NULL OR recurrence IN ('daily','weekly','monthly'));
 
 create index if not exists tasks_user_idx on public.tasks(user_id);
 create index if not exists tasks_zone_idx on public.tasks(zone_id);

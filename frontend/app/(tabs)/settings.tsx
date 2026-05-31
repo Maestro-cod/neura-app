@@ -41,6 +41,11 @@ export default function Settings() {
   const [upgrade, setUpgrade] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notifications, setNotifications] = useState(false);
+  const [familyMembers, setFamilyMembers] = useState<
+    { id: string; member_email: string; status: string }[]
+  >([]);
+  const [newMemberEmail, setNewMemberEmail] = useState("");
+  const [familyBusy, setFamilyBusy] = useState(false);
 
   useEffect(() => {
     if (profile?.name && !name) {
@@ -91,6 +96,46 @@ export default function Settings() {
       setNotifications(false);
       await AsyncStorage.setItem(REMINDERS_PREF_KEY, "false");
     }
+  };
+
+  const loadFamily = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("family_members")
+      .select("id, member_email, status")
+      .eq("owner_id", user.id)
+      .neq("status", "removed")
+      .order("created_at", { ascending: true });
+    setFamilyMembers((data as any) || []);
+  };
+
+  useEffect(() => {
+    if (profile?.plan === "family") loadFamily();
+  }, [profile?.plan, user]);
+
+  const addMember = async () => {
+    const email = newMemberEmail.trim().toLowerCase();
+    if (!user || !email) return;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      Alert.alert("Invalid email", "Enter a valid email address.");
+      return;
+    }
+    setFamilyBusy(true);
+    const { error } = await supabase
+      .from("family_members")
+      .insert({ owner_id: user.id, member_email: email });
+    if (error) {
+      Alert.alert("Couldn't add member", error.message);
+    } else {
+      setNewMemberEmail("");
+      await loadFamily();
+    }
+    setFamilyBusy(false);
+  };
+
+  const removeMember = async (id: string) => {
+    setFamilyMembers((cur) => cur.filter((m) => m.id !== id));
+    await supabase.from("family_members").delete().eq("id", id);
   };
 
   const saveName = async () => {
@@ -157,6 +202,7 @@ export default function Settings() {
   };
 
   const isPro = profile?.plan === "pro" || profile?.plan === "family";
+  const isFamily = profile?.plan === "family";
   const planLabel = isPro ? (profile?.plan === "family" ? "Family" : "PRO") : "Free";
 
   return (
@@ -278,6 +324,78 @@ export default function Settings() {
               testID="settings-manage-subscription"
               style={{ marginTop: spacing.md }}
             />
+          )}
+        </GlassCard>
+
+        {/* Family Section */}
+        <GlassCard strong testID="settings-family-section">
+          <Text style={styles.sectionLabel}>FAMILY</Text>
+          {isFamily ? (
+            <>
+              <Text style={styles.familyHint}>
+                Invite people to share your NEURA family plan.
+              </Text>
+              <View style={[styles.row, { marginTop: spacing.sm }]}>
+                <TextInput
+                  testID="family-email-input"
+                  value={newMemberEmail}
+                  onChangeText={setNewMemberEmail}
+                  placeholder="member@email.com"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  style={[styles.input, { flex: 1 }]}
+                />
+                <Pressable
+                  onPress={addMember}
+                  disabled={familyBusy || !newMemberEmail.trim()}
+                  style={[
+                    styles.saveBtn,
+                    { opacity: familyBusy || !newMemberEmail.trim() ? 0.4 : 1 },
+                  ]}
+                  testID="family-add-button"
+                >
+                  <Text style={styles.saveTxt}>Invite</Text>
+                </Pressable>
+              </View>
+              {familyMembers.length === 0 ? (
+                <Text style={[styles.familyHint, { marginTop: spacing.md }]}>
+                  No members yet.
+                </Text>
+              ) : (
+                familyMembers.map((m) => (
+                  <View key={m.id} style={styles.memberRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.memberEmail}>{m.member_email}</Text>
+                      <Text style={styles.memberStatus}>{m.status}</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => removeMember(m.id)}
+                      hitSlop={10}
+                      testID={`family-remove-${m.id}`}
+                    >
+                      <Ionicons
+                        name="close-circle-outline"
+                        size={20}
+                        color={colors.textMuted}
+                      />
+                    </Pressable>
+                  </View>
+                ))
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={styles.familyHint}>
+                Share NEURA with your household. Available on the Family plan.
+              </Text>
+              <PrimaryButton
+                title="Upgrade to Family"
+                onPress={() => setUpgrade(true)}
+                style={{ marginTop: spacing.md }}
+                testID="family-upgrade"
+              />
+            </>
           )}
         </GlassCard>
 
@@ -467,6 +585,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   saveTxt: { color: "#050508", fontFamily: fonts.bodyBold, fontSize: 13 },
+  // Family
+  familyHint: {
+    color: colors.textDim,
+    fontFamily: fonts.body,
+    fontSize: 13,
+  },
+  memberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.glassBorder,
+  },
+  memberEmail: { color: colors.text, fontFamily: fonts.body, fontSize: 14 },
+  memberStatus: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginTop: 2,
+    textTransform: "capitalize",
+  },
   // Subscription
   subCard: {},
   planRow: {
