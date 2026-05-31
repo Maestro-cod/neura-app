@@ -114,6 +114,8 @@ export default function AIAssistant() {
   const [error, setError] = useState<string | null>(null);
   const [upgrade, setUpgrade] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   // Pre-fetched context sent with every message — avoids backend DB round-trips
   const [ctxZones, setCtxZones] = useState<{ name: string }[]>([]);
@@ -146,7 +148,6 @@ export default function AIAssistant() {
   const isFree = false;
 
   const send = async () => {
-    console.log('SEND CALLED', input, user?.id);
     if (!input.trim() || !user) return;
     if (isFree) {
       setUpgrade(true);
@@ -235,6 +236,42 @@ export default function AIAssistant() {
   const onInputFocus = () => {
     if (isFree) setUpgrade(true);
   };
+
+  // Voice input via the browser's Web Speech API. Web-only — there is no
+  // built-in speech-to-text on React Native, so on a phone we tell the user.
+  const toggleVoice = () => {
+    if (Platform.OS !== "web") {
+      setError("Voice input works in the web app. On mobile, type for now.");
+      return;
+    }
+    const SR =
+      (globalThis as any).SpeechRecognition ||
+      (globalThis as any).webkitSpeechRecognition;
+    if (!SR) {
+      setError("Voice input isn't supported in this browser — try Chrome.");
+      return;
+    }
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results)
+        .map((r: any) => r[0].transcript)
+        .join(" ");
+      setInput((cur) => (cur ? `${cur} ${transcript}` : transcript));
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    recognitionRef.current = rec;
+    setListening(true);
+    rec.start();
+  };
+
+  useEffect(() => () => recognitionRef.current?.stop?.(), []);
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
@@ -360,7 +397,13 @@ export default function AIAssistant() {
               multiline
             />
             <View style={styles.inputActions}>
-              <Ionicons name="mic-outline" size={20} color={colors.textMuted} />
+              <Pressable onPress={toggleVoice} hitSlop={8} testID="chat-mic-button">
+                <Ionicons
+                  name={listening ? "mic" : "mic-outline"}
+                  size={20}
+                  color={listening ? colors.danger : colors.textMuted}
+                />
+              </Pressable>
               <Pressable
                 onPress={send}
                 disabled={sending || (!isFree && !input.trim())}

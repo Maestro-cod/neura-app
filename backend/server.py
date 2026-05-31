@@ -4,6 +4,7 @@ Supabase is the source of truth for users/profiles/tasks/zones; we use the
 service-role client only for trusted server-side writes (webhook, deletion).
 """
 import os
+import time
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -97,6 +98,33 @@ def fetch_zones(user_id: str) -> List[dict]:
     except Exception as e:
         logger.warning("fetch_zones error: %s", e)
         return []
+
+
+# ---------- Rate limiting (in-memory, per-user sliding window) ----------
+# Resets on restart and is per-process — fine for a single instance. Move to
+# Redis if the backend ever scales to multiple workers.
+from collections import defaultdict
+
+_AI_RATE_MAX = int(os.environ.get("AI_RATE_LIMIT_MAX", "20"))
+_AI_RATE_WINDOW = int(os.environ.get("AI_RATE_LIMIT_WINDOW", "60"))
+_ai_rate_hits: "defaultdict[str, list]" = defaultdict(list)
+
+
+def enforce_ai_rate_limit(user_id: str) -> None:
+    """Raise HTTP 429 when a user exceeds the AI request budget for the window."""
+    now = time.monotonic()
+    window_start = now - _AI_RATE_WINDOW
+    hits = [t for t in _ai_rate_hits[user_id] if t > window_start]
+    if len(hits) >= _AI_RATE_MAX:
+        retry = int(_AI_RATE_WINDOW - (now - hits[0])) + 1
+        raise HTTPException(
+            429,
+            f"You're sending messages too fast ({_AI_RATE_MAX}/{_AI_RATE_WINDOW}s). "
+            f"Try again in {retry}s.",
+            headers={"Retry-After": str(retry)},
+        )
+    hits.append(now)
+    _ai_rate_hits[user_id] = hits
 
 
 # ---------- Health (public) ----------
@@ -367,6 +395,7 @@ async def ai_chat(
     current_user: str = Depends(get_current_user),
 ):
     require_self(current_user, payload.user_id)
+    enforce_ai_rate_limit(payload.user_id)
     if not payload.message.strip():
         raise HTTPException(400, "Empty message")
     try:
@@ -432,6 +461,7 @@ async def ai_insight(
     current_user: str = Depends(get_current_user),
 ):
     require_self(current_user, payload.user_id)
+    enforce_ai_rate_limit(payload.user_id)
     tasks = fetch_tasks(payload.user_id)
     if not tasks:
         return {"insight": "Your mind is clear — no open tasks. Add one to start orbiting NEURA."}
