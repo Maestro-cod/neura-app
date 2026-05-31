@@ -74,6 +74,21 @@ export async function syncTaskReminders(tasks: ReminderTask[]): Promise<void> {
     });
     scheduled += 1;
   }
+
+  // Weekly digest nudge — Sunday 6pm. The summary itself is computed in-app
+  // when NEURA AI opens; this just brings the user back for it.
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Your NEURA week",
+      body: "Open NEURA for your weekly review and what's ahead.",
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+      weekday: 1,
+      hour: 18,
+      minute: 0,
+    },
+  });
 }
 
 /** Cancel every scheduled reminder (used when the user turns reminders off). */

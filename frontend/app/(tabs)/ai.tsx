@@ -26,6 +26,26 @@ const CHAT_URL = `${BACKEND_BASE}/api/ai/chat`;
 
 type Msg = { id: string; role: "user" | "assistant"; text: string };
 
+// Client-side weekly digest from the user's open tasks — no LLM, no backend.
+function weeklyDigest(
+  tasks: { urgency: string; due_date: string | null }[]
+): string | null {
+  if (tasks.length === 0) return null;
+  const open = tasks.length;
+  const urgent = tasks.filter((t) => t.urgency === "high").length;
+  const now = Date.now();
+  const weekAhead = now + 7 * 24 * 60 * 60 * 1000;
+  const dueSoon = tasks.filter((t) => {
+    if (!t.due_date) return false;
+    const d = new Date(t.due_date).getTime();
+    return !isNaN(d) && d >= now && d <= weekAhead;
+  }).length;
+  const parts = [`${open} open task${open === 1 ? "" : "s"}`];
+  if (urgent) parts.push(`${urgent} urgent`);
+  if (dueSoon) parts.push(`${dueSoon} due this week`);
+  return parts.join(" · ");
+}
+
 // Animated dots for typing indicator
 function TypingDots() {
   const dot1 = useRef(new Animated.Value(0)).current;
@@ -143,6 +163,22 @@ export default function AIAssistant() {
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages, sending]);
+
+  // Show a weekly digest as NEURA's opening line — only before a conversation starts.
+  useEffect(() => {
+    const digest = weeklyDigest(ctxTasks);
+    if (!digest) return;
+    setMessages((cur) => {
+      if (cur.length !== 1 || cur[0].id !== "m0") return cur;
+      return [
+        {
+          id: "m0",
+          role: "assistant",
+          text: `Hey — here's your week: ${digest}. What do you want to tackle first?`,
+        },
+      ];
+    });
+  }, [ctxTasks]);
 
   // Pro gate removed — AI chat is available to all logged-in users.
   const isFree = false;

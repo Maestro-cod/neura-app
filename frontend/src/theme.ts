@@ -2,7 +2,10 @@
  * NEURA design tokens — redesigned.
  * Glassmorphism dark theme with cyan/violet accents.
  */
-export const colors = {
+export type ThemeMode = "light" | "dark";
+export const THEME_STORAGE_KEY = "neura.theme.mode";
+
+const darkColors = {
   bg: "#050508",
   bgElevated: "#0b0b14",
   text: "#FFFFFF",
@@ -24,6 +27,56 @@ export const colors = {
   stressHigh: "#8B5CF6",
   stressCritical: "#FF6B6B",
 };
+
+const lightColors: typeof darkColors = {
+  bg: "#F4F5F9",
+  bgElevated: "#FFFFFF",
+  text: "#0B0B14",
+  textDim: "rgba(11,11,20,0.55)",
+  textMuted: "rgba(11,11,20,0.35)",
+  glassBg: "rgba(0,0,0,0.03)",
+  glassBgStrong: "rgba(0,0,0,0.05)",
+  glassBorder: "rgba(0,0,0,0.08)",
+  glassBorderStrong: "rgba(0,0,0,0.16)",
+  primary: "#0091B8",
+  secondary: "#7C3AED",
+  gradientStart: "#00B4D8",
+  gradientEnd: "#7C3AED",
+  danger: "#E5484D",
+  warn: "#B8860B",
+  success: "#13A05C",
+  stressLow: "#13A05C",
+  stressMed: "#0091B8",
+  stressHigh: "#7C3AED",
+  stressCritical: "#E5484D",
+};
+
+// Active palette — mutated in place so existing `colors.x` imports stay valid.
+// Screens bake these into StyleSheet.create at module load, so the chosen
+// palette must be applied before those modules evaluate (see initialMode below).
+export const colors = { ...darkColors };
+
+export function applyThemePalette(mode: ThemeMode): void {
+  Object.assign(colors, mode === "light" ? lightColors : darkColors);
+}
+
+// On web, localStorage is synchronous, so reading it here — at theme module
+// load, before any screen imports `colors` — guarantees the right palette is
+// baked on first paint. On native this returns dark and the root layout
+// applies the stored preference before rendering screens.
+function initialMode(): ThemeMode {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const v = localStorage.getItem(THEME_STORAGE_KEY);
+      if (v === "light" || v === "dark") return v;
+    }
+  } catch {
+    // localStorage unavailable (native / SSR) — fall through to default.
+  }
+  return "dark";
+}
+
+applyThemePalette(initialMode());
 
 export const zoneColors: Record<string, string> = {
   Work: "#00D4FF",

@@ -17,7 +17,7 @@ import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { colors, fonts, radius, spacing } from "@/src/theme";
+import { colors, fonts, radius, spacing, applyThemePalette, type ThemeMode } from "@/src/theme";
 import { GlassCard } from "@/src/components/GlassCard";
 import { PrimaryButton, SecondaryButton } from "@/src/components/PrimaryButton";
 import { UpgradeModal } from "@/src/components/UpgradeModal";
@@ -30,6 +30,7 @@ import {
   syncTaskReminders,
   clearAllReminders,
 } from "@/src/lib/notifications";
+import { persistThemeMode, loadThemeMode } from "@/src/lib/theme-mode";
 
 const REMINDERS_PREF_KEY = "neura.reminders.enabled";
 
@@ -46,6 +47,23 @@ export default function Settings() {
   >([]);
   const [newMemberEmail, setNewMemberEmail] = useState("");
   const [familyBusy, setFamilyBusy] = useState(false);
+  const [lightMode, setLightMode] = useState(false);
+
+  useEffect(() => {
+    loadThemeMode().then((m) => setLightMode(m === "light"));
+  }, []);
+
+  const changeTheme = async (toLight: boolean) => {
+    const mode: ThemeMode = toLight ? "light" : "dark";
+    setLightMode(toLight);
+    applyThemePalette(mode);
+    await persistThemeMode(mode);
+    if (Platform.OS === "web") {
+      window.location.reload();
+    } else {
+      Alert.alert("Theme updated", "Restart the app to fully apply the new theme.");
+    }
+  };
 
   useEffect(() => {
     if (profile?.name && !name) {
@@ -416,13 +434,20 @@ export default function Settings() {
           </View>
           <View style={styles.settingRow}>
             <View style={styles.settingInfo}>
-              <Ionicons name="moon-outline" size={18} color={colors.textDim} />
-              <Text style={styles.settingLabel}>Theme</Text>
+              <Ionicons
+                name={lightMode ? "sunny-outline" : "moon-outline"}
+                size={18}
+                color={colors.textDim}
+              />
+              <Text style={styles.settingLabel}>Light theme</Text>
             </View>
-            <View style={styles.themeBadge}>
-              <Text style={styles.themeBadgeText}>Dark</Text>
-              <Ionicons name="lock-closed" size={10} color={colors.textMuted} />
-            </View>
+            <Switch
+              value={lightMode}
+              onValueChange={changeTheme}
+              trackColor={{ false: "rgba(255,255,255,0.1)", true: colors.primary + "55" }}
+              thumbColor={lightMode ? colors.primary : "rgba(255,255,255,0.3)"}
+              testID="settings-theme-toggle"
+            />
           </View>
           <View style={styles.settingRow}>
             <View style={styles.settingInfo}>
@@ -660,22 +685,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: fonts.body,
     fontSize: 14,
-  },
-  themeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 9999,
-    backgroundColor: colors.glassBg,
-    borderWidth: 1,
-    borderColor: colors.glassBorder,
-  },
-  themeBadgeText: {
-    color: colors.textDim,
-    fontFamily: fonts.bodyMed,
-    fontSize: 11,
   },
   versionText: {
     color: colors.textMuted,
