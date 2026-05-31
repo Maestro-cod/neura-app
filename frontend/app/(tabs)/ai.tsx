@@ -128,9 +128,9 @@ export default function AIAssistant() {
     setInput("");
     setSending(true);
     try {
-      // ── Call API with 30-second timeout (LLM + DB context fetch can be slow) ──
+      // ── Call API with 60-second timeout (LLM fetches context from DB then calls Claude) ──
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("TIMEOUT")), 30000)
+        setTimeout(() => reject(new Error("TIMEOUT")), 60000)
       );
 
       const response = await Promise.race([

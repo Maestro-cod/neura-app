@@ -58,11 +58,20 @@ export default function Tasks() {
 
   const load = useCallback(async () => {
     if (!user) {
-      console.log("[Tasks] load skipped — no user");
+      // Auth not ready yet — clear skeleton so the screen isn't stuck.
+      // useEffect will re-run load() once user becomes available.
+      setLoading(false);
       return;
     }
     console.log("[Tasks] loading data for user:", user.id);
     setLoading(true);
+
+    // 10-second deadline: if Supabase never responds, stop showing skeleton.
+    const deadline = setTimeout(() => {
+      console.warn("[Tasks] query timed out — showing empty state");
+      setLoading(false);
+    }, 10000);
+
     try {
       const [zRes, tRes] = await Promise.all([
         supabase.from("zones").select("*").eq("user_id", user.id),
@@ -74,13 +83,13 @@ export default function Tasks() {
       ]);
 
       if (zRes.error) {
-        console.error("[Tasks] zones query error:", zRes.error.code, zRes.error.message);
+        console.error("[Tasks] zones error:", zRes.error.code, zRes.error.message);
       } else {
-        console.log("[Tasks] zones loaded:", zRes.data?.length ?? 0, zRes.data?.map((z: any) => z.name));
+        console.log("[Tasks] zones loaded:", zRes.data?.length ?? 0);
       }
 
       if (tRes.error) {
-        console.error("[Tasks] tasks query error:", tRes.error.code, tRes.error.message);
+        console.error("[Tasks] tasks error:", tRes.error.code, tRes.error.message);
       } else {
         console.log("[Tasks] tasks loaded:", tRes.data?.length ?? 0);
       }
@@ -90,6 +99,7 @@ export default function Tasks() {
     } catch (e: any) {
       console.error("[Tasks] load exception:", e?.message);
     } finally {
+      clearTimeout(deadline);
       setLoading(false);
     }
   }, [user]);

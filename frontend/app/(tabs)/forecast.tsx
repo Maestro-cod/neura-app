@@ -228,24 +228,46 @@ export default function Forecast() {
   const isLocked = !profile || profile.plan === "free";
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      // Auth not ready — clear skeleton; useEffect re-runs when user loads.
+      setLoading(false);
+      return;
+    }
     if (isLocked) {
       setLoading(false);
       return;
     }
     setLoading(true);
+
+    // 10-second deadline so a hung request never blocks the skeleton forever.
+    const deadline = setTimeout(() => {
+      console.warn("[Forecast] query timed out — showing empty state");
+      setLoading(false);
+    }, 10000);
+
     try {
-      const [forecastRes, { data: z }, { data: t }] = await Promise.all([
-        api.forecast(user.id),
+      // Run Supabase queries and the forecast API call in parallel.
+      // Supabase queries are independent — fetch them even if forecast fails.
+      const [zRes, tRes] = await Promise.all([
         supabase.from("zones").select("*").eq("user_id", user.id),
         supabase.from("tasks").select("id, zone_id, completed").eq("user_id", user.id),
       ]);
-      setDays(forecastRes.forecast ?? []);
-      setZones((z as any) || []);
-      setTasks((t as any) || []);
-    } catch {
+      setZones((zRes.data as any) || []);
+      setTasks((tRes.data as any) || []);
+
+      // Forecast API is a separate call — failures fall back to mock data.
+      try {
+        const forecastRes = await api.forecast(user.id);
+        setDays(forecastRes.forecast ?? []);
+      } catch (fe: any) {
+        console.warn("[Forecast] forecast API failed:", fe?.message, "— using mock data");
+        setDays([]);
+      }
+    } catch (e: any) {
+      console.error("[Forecast] load error:", e?.message);
       setDays([]);
     } finally {
+      clearTimeout(deadline);
       setLoading(false);
     }
   }, [user, isLocked]);
