@@ -137,7 +137,8 @@ export default function AIAssistant() {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages, sending]);
 
-  const isFree = !profile || profile.plan === "free";
+  // Pro gate removed — AI chat is available to all logged-in users.
+  const isFree = false;
 
   const send = async () => {
     if (!input.trim() || !user) return;
