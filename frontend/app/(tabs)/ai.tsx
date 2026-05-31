@@ -18,7 +18,11 @@ import { UpgradeModal } from "@/src/components/UpgradeModal";
 import { useAuth } from "@/src/context/AuthContext";
 import { supabase } from "@/src/lib/supabase";
 
-const CHAT_URL = "https://neura-backend-pixp6j.abacusai.app/api/ai/chat";
+const BACKEND_BASE =
+  process.env.EXPO_PUBLIC_API_URL ||
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  "https://neura-backend-pixp6j.abacusai.app";
+const CHAT_URL = `${BACKEND_BASE}/api/ai/chat`;
 
 type Msg = { id: string; role: "user" | "assistant"; text: string };
 
