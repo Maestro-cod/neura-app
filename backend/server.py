@@ -35,17 +35,19 @@ STRIPE_PRO_PRICE_ID = os.environ["STRIPE_PRO_PRICE_ID"]
 STRIPE_FAMILY_PRICE_ID = os.environ["STRIPE_FAMILY_PRICE_ID"]
 # Webhook secret is mandatory — server refuses to start without it
 STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
-ROUTELLM_API_KEY = os.environ["ROUTELLM_API_KEY"]
-ROUTELLM_BASE_URL = os.environ.get("ROUTELLM_BASE_URL", "https://routellm.abacus.ai/v1")
-ROUTELLM_MODEL = os.environ.get("ROUTELLM_MODEL", "claude-sonnet-4-6")
+# LLM config — NVIDIA NIM (OpenAI-compatible endpoint)
+# Set NVIDIA_API_KEY in env; falls back to ROUTELLM_API_KEY for existing deployments.
+LLM_API_KEY = os.environ.get("NVIDIA_API_KEY") or os.environ.get("ROUTELLM_API_KEY", "")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "meta/llama-3.1-8b-instruct")
 
 stripe.api_key = STRIPE_SECRET_KEY
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# RouteLLM client (OpenAI-compatible)
+# LLM client — OpenAI-compatible, works with NVIDIA NIM and RouteLLM
 llm_client = AsyncOpenAI(
-    api_key=ROUTELLM_API_KEY,
-    base_url=ROUTELLM_BASE_URL,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
 )
 
 
@@ -327,7 +329,7 @@ async def ai_chat(
     try:
         system = build_system_prompt(payload.user_id)
         response = await llm_client.chat.completions.create(
-            model=ROUTELLM_MODEL,
+            model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": payload.message},
@@ -362,7 +364,7 @@ async def ai_insight(
         system = "You are NEURA, a calm assistant. Reply with ONE short sentence (max 16 words) of practical advice or encouragement for the user's most urgent task. No emojis."
         msg = f"Most urgent task: '{title}' (urgency: {urgency}). Give me one short, calm tip."
         response = await llm_client.chat.completions.create(
-            model=ROUTELLM_MODEL,
+            model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": msg},
