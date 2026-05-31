@@ -94,6 +94,12 @@ export default function Tasks() {
     }
   }, [user]);
 
+  // Re-fetch when user auth resolves (useFocusEffect alone won't re-run
+  // if the screen is already focused when `user` becomes available).
+  useEffect(() => {
+    load();
+  }, [load]);
+
   useFocusEffect(
     useCallback(() => {
       load();

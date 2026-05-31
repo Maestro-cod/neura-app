@@ -42,19 +42,21 @@ async function post<T = any>(
   }
 
   if (!accessToken) {
-    console.error(TAG, "No access token available — user is not authenticated");
-    throw new Error("Not authenticated — no Supabase session token available. Please log in again.");
+    console.log(TAG, "No access token — proceeding without Authorization header (auth guard removed)");
   }
 
   // ── 2. Build request ────────────────────────────────────────────────────
   const url = `${BACKEND}${path}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${accessToken}`,
   };
 
+  if (accessToken) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+
   console.log(TAG, `POST ${path}`);
-  console.log(TAG, "Authorization header:", headers.Authorization ? `Present (Bearer ${accessToken.slice(0, 12)}…)` : "MISSING");
+  console.log(TAG, "Authorization header:", accessToken ? `Present (Bearer ${accessToken.slice(0, 12)}…)` : "omitted");
   console.log(TAG, "Backend URL:", BACKEND || "⚠ UNDEFINED — EXPO_PUBLIC_API_URL / EXPO_PUBLIC_BACKEND_URL not set");
 
   if (!BACKEND) {

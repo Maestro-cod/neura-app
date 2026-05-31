@@ -17,7 +17,6 @@ import { GlassCard } from "@/src/components/GlassCard";
 import { UpgradeModal } from "@/src/components/UpgradeModal";
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/lib/api";
-import { supabase } from "@/src/lib/supabase";
 
 type Msg = { id: string; role: "user" | "assistant"; text: string };
 
@@ -129,43 +128,13 @@ export default function AIAssistant() {
     setInput("");
     setSending(true);
     try {
-      // ── Pre-flight: get session token BEFORE calling the API ──
-      console.log("[AI Chat] Getting Supabase session…");
-      const { data: { session }, error: sessErr } = await supabase.auth.getSession();
-
-      if (sessErr) {
-        console.log("[AI Chat] Error:", sessErr.message);
-      }
-
-      let token = session?.access_token;
-      console.log("[AI Chat] Session token:", token ? `Present (${token.substring(0, 20)}…)` : "MISSING");
-      console.log("[AI Chat] User ID:", user.id);
-
-      if (!token) {
-        // Session lost — try refreshing it
-        console.log("[AI Chat] No token — attempting session refresh…");
-        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr) {
-          console.log("[AI Chat] Error:", refreshErr.message);
-          throw new Error("SESSION_EXPIRED");
-        }
-        token = refreshData.session?.access_token;
-        console.log("[AI Chat] Refreshed token:", token ? `Present (${token.substring(0, 20)}…)` : "Still MISSING");
-
-        if (!token) {
-          throw new Error("SESSION_EXPIRED");
-        }
-      }
-
-      // ── Call API with 10-second timeout ──
-      console.log("[AI Chat] About to call API with token:", token.substring(0, 20) + "...");
-
+      // ── Call API with 30-second timeout (LLM + DB context fetch can be slow) ──
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("TIMEOUT")), 10000)
+        setTimeout(() => reject(new Error("TIMEOUT")), 30000)
       );
 
       const response = await Promise.race([
-        api.aiChat({ user_id: user.id, message: text }, token),
+        api.aiChat({ user_id: user.id, message: text }),
         timeoutPromise,
       ]);
 
@@ -177,23 +146,17 @@ export default function AIAssistant() {
       ]);
       console.log("[AI Chat] Message sent successfully");
     } catch (e: any) {
-      console.log("[AI Chat] Error:", e?.message || e);
+      console.log("[AI Chat] ── ERROR DETAILS ──────────────────────");
+      console.log("[AI Chat] name   :", e?.name);
+      console.log("[AI Chat] message:", e?.message);
+      console.log("[AI Chat] string :", String(e));
+      console.log("[AI Chat] json   :", JSON.stringify(e));
+      console.log("[AI Chat] ────────────────────────────────────────");
 
-      // ── Specific error handling ──
-      let errMsg: string;
-      if (
-        e?.message === "SESSION_EXPIRED" ||
-        e?.message?.includes("401") ||
-        e?.message?.includes("authenticated")
-      ) {
-        errMsg = "Session expired. Please sign out and sign in again.";
-      } else if (e?.message === "TIMEOUT") {
-        errMsg = "Connection lost. Tap to retry.";
-      } else if (e?.message?.includes("Backend URL")) {
-        errMsg = "Server not configured. Contact support.";
-      } else {
-        errMsg = "Connection lost. Tap to retry.";
-      }
+      const errMsg =
+        e?.message === "TIMEOUT"
+          ? "Connection timed out. Tap to retry."
+          : `Error: ${e?.message || String(e) || "unknown"}`;
 
       setError(errMsg);
       setMessages((cur) => [

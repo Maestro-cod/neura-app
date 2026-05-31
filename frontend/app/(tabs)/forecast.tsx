@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -249,6 +249,12 @@ export default function Forecast() {
       setLoading(false);
     }
   }, [user, isLocked]);
+
+  // Re-fetch when user auth resolves (useFocusEffect alone won't re-run
+  // if the screen is already focused when `user` becomes available).
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
